@@ -32,7 +32,7 @@ export default async function PlannerPage() {
       <main className="md:ml-64 px-4 pb-20 pt-6 md:px-10 md:pt-10 mb-10 md:mb-0">
         <PlannerCalendar initialPlans={initialPlans} />
       </main>
-      <MobileNav />
+      <MobileNav currentPage="/planner" />
     </div>
   );
 }
