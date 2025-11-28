@@ -29,9 +29,9 @@ export default function MobileNav({
       className="
         fixed bottom-4 left-1/2 z-40 flex
         w-[92%] max-w-md -translate-x-1/2 items-center justify-between
-        rounded-2xl border border-base-300/60 bg-base-200/80
+        rounded-2xl border border-base-300/50 bg-base-200/25
         px-3 py-2 shadow-[0_18px_60px_rgba(0,0,0,0.55)]
-        backdrop-blur-xl
+        backdrop-blur-xs
         md:hidden
       "
     >
