@@ -1,7 +1,6 @@
-// app/planner/PlannerCalendar.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, CSSProperties } from "react";
 import {
   CalendarDays,
   ChevronLeft,
@@ -20,6 +19,16 @@ import {
   type Importance,
   type Recurrence,
 } from "../actions/planner/actions";
+
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  useDroppable,
+  useDraggable,
+} from "@dnd-kit/core";
 
 type PlannerEvent = {
   id: string;
@@ -157,8 +166,12 @@ export function PlannerCalendar({
   const [formImportance, setFormImportance] = useState<Importance>("MEDIUM");
   const [formRecurrence, setFormRecurrence] = useState<Recurrence>("NONE");
 
-  // Drag state (for moving between times/days)
-  const [draggingId, setDraggingId] = useState<string | null>(null);
+  // dnd-kit sensors for mouse + touch
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    })
+  );
 
   const weekDates = useMemo(
     () =>
@@ -262,82 +275,6 @@ export function PlannerCalendar({
     setIsModalOpen(false);
   }
 
-  function handleDragStart(eventId: string) {
-    setDraggingId(eventId);
-  }
-
-  async function handleDropTimeSlot(
-    dayIndex: number,
-    hour: number,
-    e: React.DragEvent<HTMLDivElement>
-  ) {
-    e.preventDefault();
-    if (!draggingId) return;
-
-    const newStartsAt = dateFromWeekAndSlot(currentWeekStart, dayIndex, hour);
-
-    // optimistic UI
-    setEvents((prev) =>
-      prev.map((ev) =>
-        ev.id === draggingId ? { ...ev, startsAt: newStartsAt } : ev
-      )
-    );
-
-    try {
-      await updatePlanningTime({
-        id: draggingId,
-        newStartsAt: newStartsAt.toISOString(),
-      });
-    } catch (err) {
-      console.error("Failed to update plan time", err);
-    }
-
-    setDraggingId(null);
-  }
-
-  async function handleDropDayPill(
-    targetDayIndex: number,
-    e: React.DragEvent<HTMLButtonElement>
-  ) {
-    e.preventDefault();
-    if (!draggingId) return;
-
-    const ev = events.find((event) => event.id === draggingId);
-    if (!ev) {
-      setDraggingId(null);
-      return;
-    }
-
-    const hour = ev.startsAt.getHours();
-    const newStartsAt = dateFromWeekAndSlot(
-      currentWeekStart,
-      targetDayIndex,
-      hour
-    );
-
-    // optimistic
-    setEvents((prev) =>
-      prev.map((event) =>
-        event.id === draggingId ? { ...event, startsAt: newStartsAt } : event
-      )
-    );
-
-    try {
-      await updatePlanningTime({
-        id: draggingId,
-        newStartsAt: newStartsAt.toISOString(),
-      });
-    } catch (error) {
-      console.error("Failed to move event between days", error);
-    }
-
-    setDraggingId(null);
-  }
-
-  function handleDragOver(e: React.DragEvent) {
-    e.preventDefault();
-  }
-
   async function handleDelete(eventId: string) {
     const ok = window.confirm("Delete this plan?");
     if (!ok) return;
@@ -408,6 +345,61 @@ export function PlannerCalendar({
     setCurrentWeekStart(getStartOfWeek(currentMonthDate));
   }
 
+  // 🔁 dnd-kit: handle drop on time slots / day pills
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over) return;
+
+    const evId = active.id as string;
+    const overId = String(over.id);
+
+    // Drop on a specific time slot: "slot:dayIndex:hour"
+    if (overId.startsWith("slot:")) {
+      const [, dayStr, hourStr] = overId.split(":");
+      const dayIdx = Number(dayStr);
+      const hour = Number(hourStr);
+
+      const newStartsAt = dateFromWeekAndSlot(currentWeekStart, dayIdx, hour);
+
+      setEvents((prev) =>
+        prev.map((ev) =>
+          ev.id === evId ? { ...ev, startsAt: newStartsAt } : ev
+        )
+      );
+
+      updatePlanningTime({
+        id: evId,
+        newStartsAt: newStartsAt.toISOString(),
+      }).catch((err) => console.error("Failed to update plan time", err));
+
+      return;
+    }
+
+    // Drop on a day pill: "day:dayIndex" (keep the same hour)
+    if (overId.startsWith("day:")) {
+      const [, dayStr] = overId.split(":");
+      const dayIdx = Number(dayStr);
+      const ev = events.find((e) => e.id === evId);
+      if (!ev) return;
+
+      const hour = ev.startsAt.getHours();
+      const newStartsAt = dateFromWeekAndSlot(currentWeekStart, dayIdx, hour);
+
+      setEvents((prev) =>
+        prev.map((e) => (e.id === evId ? { ...e, startsAt: newStartsAt } : e))
+      );
+
+      updatePlanningTime({
+        id: evId,
+        newStartsAt: newStartsAt.toISOString(),
+      }).catch((err) =>
+        console.error("Failed to move event between days", err)
+      );
+
+      return;
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -419,8 +411,8 @@ export function PlannerCalendar({
           </div>
           <p className="text-sm text-base-content/70">
             TickTick-style planner. Week view for detailed planning, Month view
-            for a quick overview. Click a time to add, drag to reschedule, or
-            click an event to edit.
+            for a quick overview. Tap a time to add, drag to reschedule, or tap
+            an event to edit.
           </p>
         </div>
 
@@ -509,266 +501,160 @@ export function PlannerCalendar({
         </div>
       </div>
 
-      {/* ---- MONTH VIEW ---- */}
-      {viewMode === "MONTH" && (
-        <div className="space-y-4">
-          {/* Month grid */}
-          <div className="overflow-x-auto rounded-2xl border border-base-300 bg-base-100 shadow-sm">
-            <div className="min-w-[700px]">
-              {/* Weekday header */}
-              <div className="grid grid-cols-7 border-b border-base-300 bg-base-200/70 text-center text-xs font-semibold uppercase tracking-wide text-base-content/70">
-                {DAY_LABELS.map((label) => (
-                  <div key={label} className="px-2 py-2">
-                    {label}
-                  </div>
-                ))}
-              </div>
-
-              {/* Weeks */}
-              <div className="grid grid-rows-6">
-                {monthMatrix.map((week, wIdx) => (
-                  <div
-                    key={wIdx}
-                    className="grid grid-cols-7 border-b border-base-200 last:border-b-0"
-                  >
-                    {week.map((date, dIdx) => {
-                      const inCurrentMonth =
-                        date.getMonth() === currentMonthDate.getMonth();
-                      const isTodayFlag = isSameDay(date, today);
-                      const dateEvents = eventsForDate(date);
-                      const isActive = isSameDay(
-                        date,
-                        addDays(currentWeekStart, activeDayIndex)
-                      );
-
-                      return (
-                        <button
-                          key={dIdx}
-                          onClick={() => {
-                            // Sync active day & week to this date
-                            setCurrentWeekStart(getStartOfWeek(date));
-                            setActiveDayIndex(date.getDay());
-                          }}
-                          className={`flex min-h-[80px] flex-col items-start border-r border-base-200 px-2 py-2 text-left text-xs last:border-r-0 transition ${
-                            !inCurrentMonth
-                              ? "bg-base-100/70 text-base-content/40"
-                              : ""
-                          } ${
-                            isActive
-                              ? "ring-2 ring-primary/60 ring-offset-2"
-                              : ""
-                          }`}
-                        >
-                          <div className="mb-1 flex w-full items-center justify-between">
-                            <span
-                              className={`flex h-7 w-7 items-center justify-center rounded-full text-sm ${
-                                isTodayFlag
-                                  ? "bg-primary text-primary-content"
-                                  : "text-base-content"
-                              }`}
-                            >
-                              {date.getDate()}
-                            </span>
-                            {dateEvents.length > 0 && (
-                              <span className="text-[10px] text-base-content/60">
-                                {dateEvents.length} plan
-                                {dateEvents.length > 1 ? "s" : ""}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            {dateEvents.slice(0, 3).map((ev) => (
-                              <div
-                                key={ev.id}
-                                className={`line-clamp-1 rounded-md px-1 py-0.5 text-[10px] ${
-                                  importanceStyles[ev.importance]
-                                } ${
-                                  ev.completed ? "line-through opacity-60" : ""
-                                }`}
-                              >
-                                {ev.title}
-                              </div>
-                            ))}
-                            {dateEvents.length > 3 && (
-                              <span className="text-[10px] text-base-content/50">
-                                +{dateEvents.length - 3} more
-                              </span>
-                            )}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Agenda for selected day (under month) */}
-          <div className="text-xs font-semibold text-base-content/70">
-            Day details
-          </div>
-        </div>
-      )}
-
-      {/* ---- WEEK VIEW DAY STRIP (mobile) ---- */}
-      <div className="flex gap-2 overflow-x-auto pb-1 md:hidden">
-        {weekDates.map((day, idx) => {
-          const isSelected = idx === activeDayIndex;
-          const isTodayFlag = isSameDay(day.date, today);
-          return (
-            <button
-              key={idx}
-              onClick={() => setActiveDayIndex(idx)}
-              onDrop={(e) => handleDropDayPill(idx, e)}
-              onDragOver={handleDragOver}
-              className={`flex min-w-[3.25rem] flex-col items-center rounded-2xl px-2 py-2 text-xs transition ${
-                isSelected
-                  ? "bg-primary text-primary-content shadow-sm"
-                  : "bg-base-100 text-base-content border border-base-300"
-              }`}
-            >
-              <span className="font-semibold">{day.label}</span>
-              <span
-                className={`mt-1 flex h-7 w-7 items-center justify-center rounded-full text-sm ${
-                  isTodayFlag && !isSelected
-                    ? "border border-primary text-primary"
-                    : ""
-                } ${isSelected ? "bg-primary-content text-primary" : ""}`}
-              >
-                {day.dayNumber}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Desktop evenly spaced day strip */}
-      <div className="hidden grid-cols-7 gap-3 pb-2 md:grid">
-        {weekDates.map((day, idx) => {
-          const isSelected = idx === activeDayIndex;
-          const isTodayFlag = isSameDay(day.date, today);
-          return (
-            <button
-              key={idx}
-              onClick={() => setActiveDayIndex(idx)}
-              onDrop={(e) => handleDropDayPill(idx, e)}
-              onDragOver={handleDragOver}
-              className={`flex flex-col items-center rounded-2xl px-3 py-2 text-xs transition ${
-                isSelected
-                  ? "bg-primary text-primary-content shadow-sm"
-                  : "bg-base-100 text-base-content border border-base-300"
-              }`}
-            >
-              <span className="font-semibold">{day.label}</span>
-              <span
-                className={`mt-1 flex h-7 w-7 items-center justify-center rounded-full text-sm ${
-                  isTodayFlag && !isSelected
-                    ? "border border-primary text-primary"
-                    : ""
-                } ${isSelected ? "bg-primary-content text-primary" : ""}`}
-              >
-                {day.dayNumber}
-              </span>
-              <span className="mt-1 text-[11px] text-base-content/60">
-                {day.dateLabel}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* ---- AGENDA VIEW (used for both week & month active day) ---- */}
-      <div className="space-y-2 max-h-[70vh] overflow-y-auto">
-        {HOURS.map((hour) => {
-          const slotEvents = eventsForSlot(activeDayIndex, hour);
-          return (
-            <div
-              key={hour}
-              onDrop={(e) => handleDropTimeSlot(activeDayIndex, hour, e)}
-              onDragOver={handleDragOver}
-              className="rounded-xl border border-base-300 bg-base-100 px-3 py-2 shadow-sm"
-            >
-              <div className="mb-1 flex items-center justify-between">
-                <span className="flex items-center gap-2 text-xs font-semibold text-base-content/80">
-                  <Clock className="h-3 w-3" />
-                  {formatHour(hour)}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => openCreateModal(activeDayIndex, hour)}
-                  className="btn btn-ghost btn-xs gap-1"
-                >
-                  <Plus className="h-3 w-3" />
-                  Add
-                </button>
-              </div>
-              {slotEvents.length === 0 ? (
-                <p className="text-[11px] text-base-content/40">No plans yet</p>
-              ) : (
-                <div className="flex flex-col gap-1">
-                  {slotEvents.map((ev) => (
-                    <div
-                      key={ev.id}
-                      draggable
-                      onDragStart={() => handleDragStart(ev.id)}
-                      onClick={() => openEditModal(ev)}
-                      className={`flex cursor-grab items-center gap-2 rounded-lg px-2 py-1 text-xs text-base-content ${
-                        importanceStyles[ev.importance]
-                      } hover:brightness-110 active:cursor-grabbing ${
-                        ev.completed ? "opacity-60" : ""
-                      }`}
-                    >
-                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-base-100/70 text-[10px] font-bold">
-                        ●
-                      </span>
-                      <div className="flex-1 truncate">
-                        <div
-                          className={`font-semibold truncate ${
-                            ev.completed ? "line-through" : ""
-                          }`}
-                        >
-                          {ev.title}
-                        </div>
-                        {ev.description && (
-                          <div
-                            className={`text-[10px] text-base-content/70 truncate ${
-                              ev.completed ? "line-through" : ""
-                            }`}
-                          >
-                            {ev.description}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEditModal(ev);
-                        }}
-                        className="p-1 text-base-content/50 hover:text-primary"
-                      >
-                        <Edit3 className="h-3 w-3" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(ev.id);
-                        }}
-                        className="p-1 text-base-content/50 hover:text-error"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
+      {/* dnd context wraps both month + week parts */}
+      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+        {/* ---- MONTH VIEW ---- */}
+        {viewMode === "MONTH" && (
+          <div className="space-y-4">
+            {/* Month grid */}
+            <div className="overflow-x-auto rounded-2xl border border-base-300 bg-base-100 shadow-sm">
+              <div className="min-w-[700px]">
+                {/* Weekday header */}
+                <div className="grid grid-cols-7 border-b border-base-300 bg-base-200/70 text-center text-xs font-semibold uppercase tracking-wide text-base-content/70">
+                  {DAY_LABELS.map((label) => (
+                    <div key={label} className="px-2 py-2">
+                      {label}
                     </div>
                   ))}
                 </div>
-              )}
+
+                {/* Weeks */}
+                <div className="grid grid-rows-6">
+                  {monthMatrix.map((week, wIdx) => (
+                    <div
+                      key={wIdx}
+                      className="grid grid-cols-7 border-b border-base-200 last:border-b-0"
+                    >
+                      {week.map((date, dIdx) => {
+                        const inCurrentMonth =
+                          date.getMonth() === currentMonthDate.getMonth();
+                        const isTodayFlag = isSameDay(date, today);
+                        const dateEvents = eventsForDate(date);
+                        const isActive = isSameDay(
+                          date,
+                          addDays(currentWeekStart, activeDayIndex)
+                        );
+
+                        return (
+                          <button
+                            key={dIdx}
+                            onClick={() => {
+                              // Sync active day & week to this date
+                              setCurrentWeekStart(getStartOfWeek(date));
+                              setActiveDayIndex(date.getDay());
+                            }}
+                            className={`flex min-h-[80px] flex-col items-start border-r border-base-200 px-2 py-2 text-left text-xs last:border-r-0 transition ${
+                              !inCurrentMonth
+                                ? "bg-base-100/70 text-base-content/40"
+                                : ""
+                            } ${
+                              isActive
+                                ? "ring-2 ring-primary/60 ring-offset-2"
+                                : ""
+                            }`}
+                          >
+                            <div className="mb-1 flex w-full items-center justify-between">
+                              <span
+                                className={`flex h-7 w-7 items-center justify-center rounded-full text-sm ${
+                                  isTodayFlag
+                                    ? "bg-primary text-primary-content"
+                                    : "text-base-content"
+                                }`}
+                              >
+                                {date.getDate()}
+                              </span>
+                              {dateEvents.length > 0 && (
+                                <span className="text-[10px] text-base-content/60">
+                                  {dateEvents.length} plan
+                                  {dateEvents.length > 1 ? "s" : ""}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex flex-col gap-1">
+                              {dateEvents.slice(0, 3).map((ev) => (
+                                <div
+                                  key={ev.id}
+                                  className={`line-clamp-1 rounded-md px-1 py-0.5 text-[10px] ${
+                                    importanceStyles[ev.importance]
+                                  } ${
+                                    ev.completed
+                                      ? "line-through opacity-60"
+                                      : ""
+                                  }`}
+                                >
+                                  {ev.title}
+                                </div>
+                              ))}
+                              {dateEvents.length > 3 && (
+                                <span className="text-[10px] text-base-content/50">
+                                  +{dateEvents.length - 3} more
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-          );
-        })}
-      </div>
+
+            {/* Agenda for selected day (under month) */}
+            <div className="text-xs font-semibold text-base-content/70">
+              Day details
+            </div>
+          </div>
+        )}
+
+        {/* ---- WEEK VIEW DAY STRIP (mobile) ---- */}
+        <div className="flex gap-2 overflow-x-auto pb-1 md:hidden">
+          {weekDates.map((day, idx) => (
+            <DayPill
+              key={idx}
+              index={idx}
+              day={day}
+              today={today}
+              activeDayIndex={activeDayIndex}
+              setActiveDayIndex={setActiveDayIndex}
+            />
+          ))}
+        </div>
+
+        {/* Desktop evenly spaced day strip */}
+        <div className="hidden grid-cols-7 gap-3 pb-2 md:grid">
+          {weekDates.map((day, idx) => (
+            <DayPill
+              key={idx}
+              index={idx}
+              day={day}
+              today={today}
+              activeDayIndex={activeDayIndex}
+              setActiveDayIndex={setActiveDayIndex}
+              showDateLabel
+            />
+          ))}
+        </div>
+
+        {/* ---- AGENDA VIEW (used for both week & month active day) ---- */}
+        <div className="space-y-2 max-h-[70vh] overflow-y-auto">
+          {HOURS.map((hour) => {
+            const slotEvents = eventsForSlot(activeDayIndex, hour);
+            return (
+              <TimeSlotRow
+                key={hour}
+                dayIndex={activeDayIndex}
+                hour={hour}
+                events={slotEvents}
+                openCreateModal={openCreateModal}
+                openEditModal={openEditModal}
+                handleDelete={handleDelete}
+              />
+            );
+          })}
+        </div>
+      </DndContext>
 
       {/* Add / Edit Plan Modal */}
       {isModalOpen && (
@@ -880,6 +766,207 @@ export function PlannerCalendar({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------- Day pill (droppable for moving events between days) ---------- */
+
+type DayPillProps = {
+  index: number;
+  day: {
+    label: string;
+    date: Date;
+    dateLabel: string;
+    dayNumber: number;
+  };
+  today: Date;
+  activeDayIndex: number;
+  setActiveDayIndex: (idx: number) => void;
+  showDateLabel?: boolean;
+};
+
+function DayPill({
+  index,
+  day,
+  today,
+  activeDayIndex,
+  setActiveDayIndex,
+  showDateLabel,
+}: DayPillProps) {
+  const { setNodeRef, isOver } = useDroppable({ id: `day:${index}` });
+
+  const isSelected = index === activeDayIndex;
+  const isTodayFlag = isSameDay(day.date, today);
+
+  return (
+    <button
+      ref={setNodeRef}
+      onClick={() => setActiveDayIndex(index)}
+      className={`flex flex-col items-center rounded-2xl px-3 py-2 text-xs transition border ${
+        isSelected
+          ? "bg-primary text-primary-content shadow-sm border-primary"
+          : "bg-base-100 text-base-content border-base-300"
+      } ${isOver ? "ring-2 ring-primary/60" : ""}`}
+    >
+      <span className="font-semibold">{day.label}</span>
+      <span
+        className={`mt-1 flex h-7 w-7 items-center justify-center rounded-full text-sm ${
+          isTodayFlag && !isSelected ? "border border-primary text-primary" : ""
+        } ${isSelected ? "bg-primary-content text-primary" : ""}`}
+      >
+        {day.dayNumber}
+      </span>
+      {showDateLabel && (
+        <span className="mt-1 text-[11px] text-base-content/60">
+          {day.dateLabel}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/* ---------- Time slot row (droppable per hour) ---------- */
+
+type TimeSlotRowProps = {
+  dayIndex: number;
+  hour: number;
+  events: PlannerEvent[];
+  openCreateModal: (dayIndex: number, hour: number) => void;
+  openEditModal: (ev: PlannerEvent) => void;
+  handleDelete: (id: string) => void;
+};
+
+function TimeSlotRow({
+  dayIndex,
+  hour,
+  events,
+  openCreateModal,
+  openEditModal,
+  handleDelete,
+}: TimeSlotRowProps) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `slot:${dayIndex}:${hour}`,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`rounded-xl border border-base-300 bg-base-100 px-3 py-2 shadow-sm transition-colors ${
+        isOver ? "border-primary/70 bg-base-200" : ""
+      }`}
+    >
+      <div className="mb-1 flex items-center justify-between">
+        <span className="flex items-center gap-2 text-xs font-semibold text-base-content/80">
+          <Clock className="h-3 w-3" />
+          {formatHour(hour)}
+        </span>
+        <button
+          type="button"
+          onClick={() => openCreateModal(dayIndex, hour)}
+          className="btn btn-ghost btn-xs gap-1"
+        >
+          <Plus className="h-3 w-3" />
+          Add
+        </button>
+      </div>
+      {events.length === 0 ? (
+        <p className="text-[11px] text-base-content/40">No plans yet</p>
+      ) : (
+        <div className="flex flex-col gap-1">
+          {events.map((ev) => (
+            <PlannerEventCard
+              key={ev.id}
+              ev={ev}
+              onEdit={openEditModal}
+              onDelete={handleDelete}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Draggable event card ---------- */
+
+type PlannerEventCardProps = {
+  ev: PlannerEvent;
+  onEdit: (ev: PlannerEvent) => void;
+  onDelete: (id: string) => void;
+};
+
+function PlannerEventCard({ ev, onEdit, onDelete }: PlannerEventCardProps) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({ id: ev.id });
+
+  const style: CSSProperties = {
+    transform: transform
+      ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
+      : undefined,
+    opacity: isDragging ? 0.8 : 1,
+    boxShadow: isDragging
+      ? "0 12px 30px rgba(0,0,0,0.25)"
+      : "0 2px 8px rgba(0,0,0,0.18)",
+    cursor: "grab",
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      className="active:cursor-grabbing"
+      onClick={() => onEdit(ev)}
+    >
+      <div
+        className={`flex items-center gap-2 rounded-lg px-2 py-1 text-xs text-base-content ${
+          importanceStyles[ev.importance]
+        } hover:brightness-110 ${ev.completed ? "opacity-60" : ""}`}
+      >
+        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-base-100/70 text-[10px] font-bold">
+          ●
+        </span>
+        <div className="flex-1 truncate">
+          <div
+            className={`font-semibold truncate ${
+              ev.completed ? "line-through" : ""
+            }`}
+          >
+            {ev.title}
+          </div>
+          {ev.description && (
+            <div
+              className={`text-[10px] text-base-content/70 truncate ${
+                ev.completed ? "line-through" : ""
+              }`}
+            >
+              {ev.description}
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(ev);
+          }}
+          className="p-1 text-base-content/50 hover:text-primary"
+        >
+          <Edit3 className="h-3 w-3" />
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(ev.id);
+          }}
+          className="p-1 text-base-content/50 hover:text-error"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      </div>
     </div>
   );
 }

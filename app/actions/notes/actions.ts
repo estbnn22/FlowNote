@@ -36,7 +36,7 @@ export async function createNote(formData: FormData) {
     },
   });
 
-  revalidatePath("/notes");
+  redirect("/notes");
 }
 
 export async function updateNote(formData: FormData) {
@@ -87,7 +87,7 @@ export async function deleteNote(formData: FormData) {
     },
   });
 
-  revalidatePath("/notes");
+  redirect("/notes");
 }
 
 export async function moveNoteToImportance(id: string, importance: Importance) {
@@ -99,8 +99,7 @@ export async function moveNoteToImportance(id: string, importance: Importance) {
     data: { importance },
   });
 
-  // refresh the /notes page so server-rendered data stays in sync
-  revalidatePath("/notes");
+  redirect("/notes");
 }
 
 export async function togglePinnedNote(id: string) {
@@ -119,5 +118,5 @@ export async function togglePinnedNote(id: string) {
     data: { pinned: !existing.pinned },
   });
 
-  revalidatePath("/notes");
+  redirect("/notes");
 }

@@ -1,4 +1,3 @@
-// app/notes/page.tsx
 import MobileNav from "@/components/mobileBar";
 import SideBar from "@/components/sideBar";
 import { stackServerApp } from "@/stack/server";
