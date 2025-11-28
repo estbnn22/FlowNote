@@ -1,6 +1,7 @@
 // components/TodoBoard.tsx
 "use client";
 
+import React from "react";
 import { useState, DragEvent, useTransition } from "react";
 import {
   Clock3,
@@ -43,10 +44,10 @@ export default function TodoBoard({ initialTodos, savedId }: Props) {
     LOW: todos.filter((t) => t.importance === "LOW"),
   };
 
-  function handleDragStart(e: DragEvent<HTMLDivElement>, id: string) {
-    e.dataTransfer.setData("text/plain", id);
+  const handleDragStart = (e: React.DragEvent<HTMLElement>, todoId: string) => {
+    e.dataTransfer.setData("text/plain", todoId);
     e.dataTransfer.effectAllowed = "move";
-  }
+  };
 
   function handleDragOver(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
