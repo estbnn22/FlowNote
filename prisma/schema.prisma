@@ -1,0 +1,70 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Importance {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum Status {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+model Note {
+  id         String     @id @default(cuid())
+  userId     String
+  title      String
+  content    String
+  importance Importance @default(MEDIUM)
+  pinned     Boolean    @default(false)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@index([userId, createdAt])
+}
+
+model ToDo {
+  id         String     @id @default(cuid())
+  userId     String
+  title      String
+  status     Status     @default(TODO)
+  importance Importance @default(MEDIUM)
+  dueAt      DateTime?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@index([userId, status, dueAt])
+}
+
+model Planning {
+  id          String     @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  startsAt    DateTime
+  endsAt      DateTime?
+  importance  Importance @default(MEDIUM)
+
+  completed    Boolean @default(false)
+  sourceTodoId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, startsAt])
+}
