@@ -1,36 +1,178 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+FlowNote — Productivity Workspace for Notes, Todos & Planning
 
-## Getting Started
+A fast, modern, Trello-inspired productivity app built with Next.js, Prisma, and Stack Auth.
 
-First, run the development server:
+🚀 Overview
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+FlowNote is a full-stack productivity application designed to centralize notes, todos, task boards, and planning into a single, customizable workspace.
+Inspired by Notion, Trello, and Apple Notes — but fully engineered from scratch.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+This app showcases real-world full-stack engineering, including:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Authentication & RBAC with Stack Auth
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Full CRUD for Notes, Notebooks, Todos, and Plans
 
-## Learn More
+Drag-and-drop Kanban board
 
-To learn more about Next.js, take a look at the following resources:
+Color-coded importance levels
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Server Actions for real-time persistence
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Mobile-optimized UI with collapsible side panels
 
-## Deploy on Vercel
+Prisma + PostgreSQL backend
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Interactive UI with Framer Motion
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+✨ Features
+📝 Notes System
+
+Create, edit, delete notes
+
+Organize notes into Notebooks
+
+Mobile-friendly toggleable notebook sidebar
+
+Importance-based color labels
+
+Drag-and-drop support (optional)
+
+✅ Todos
+
+Status workflow: To-Do → In Progress → Completed
+
+Auto-save when toggling checkboxes
+
+Priority badges with icons
+
+Drag-and-drop across columns
+
+Edit and update tasks instantly
+
+Due date indicators
+
+📚 Notebooks
+
+Create, rename, delete notebooks
+
+Filter notes by notebook
+
+Clean visual navigation for desktop & mobile
+
+🗂️ Planning Columns
+
+Fully toggleable columns
+
+Drag-and-drop tasks between sections
+
+Highly customizable layout
+
+📱 Mobile-First UX
+
+Collapsible notebooks
+
+Slide-out sidebars
+
+Touch-friendly drag and drop
+
+Smooth animations
+
+🛠️ Tech Stack
+Frontend
+
+Next.js 15 (App Router)
+
+React 19
+
+Tailwind CSS + DaisyUI
+
+TypeScript
+
+Framer Motion (animations)
+
+DnD Kit (drag-and-drop)
+
+Backend
+
+Prisma ORM
+
+PostgreSQL (Neon)
+
+Stack Auth (authentication)
+
+Deployment
+
+Vercel
+
+Github Actions (optional)
+
+📂 Project Structure
+/app
+  ├─ notes/
+  │   ├─ page.tsx
+  │   ├─ [notebookId]/
+  ├─ todos/
+  ├─ components/
+  ├─ api/
+  └─ actions/
+
+prisma/
+  ├─ schema.prisma
+  └─ migrations/
+
+public/
+  ├─ icons/
+  └─ logo.png
+
+🔐 Authentication
+
+FlowNote uses Stack Auth for:
+
+User sessions
+
+User metadata
+
+Protected routes
+
+Server-side identity in server actions
+
+This ensures secure access to user-specific Notes, Todos, and Plans.
+
+🗄️ Database Models (Prisma)
+
+Includes (sample):
+
+User
+
+Notebook
+
+Note
+
+Todo
+
+Plan
+
+Activity (optional)
+
+🧭 Roadmap
+
+ Search bar for notes & todos
+
+ AI note summarization
+
+ Sidebar customization
+
+ Dark Mode
+
+ Public sharable notes
+
+ File uploads & attachments
+
+ 🙌 Author
+
+Esteban Machuca
+Full-Stack Developer — Fort Worth, TX
+📧 estebanmcodes@gmail.com
+
+🔗 GitHub: https://github.com/estbnn22
