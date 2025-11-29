@@ -35,6 +35,7 @@ type PlannerEvent = {
   title: string;
   description: string | null;
   startsAt: Date;
+  endsAt: Date;
   importance: Importance;
   completed: boolean;
 };
@@ -46,8 +47,8 @@ type ViewMode = "WEEK" | "MONTH";
 
 function getStartOfWeek(date: Date) {
   const d = new Date(date);
-  const day = d.getDay(); // 0–6
-  const diff = d.getDate() - day; // back to Sunday
+  const day = d.getDay();
+  const diff = d.getDate() - day;
   d.setDate(diff);
   d.setHours(0, 0, 0, 0);
   return d;
@@ -63,6 +64,17 @@ function formatHour(hour: number) {
   const suffix = hour >= 12 ? "PM" : "AM";
   const h12 = hour % 12 === 0 ? 12 : hour % 12;
   return `${h12}:00 ${suffix}`;
+}
+
+function formatTimeRange(start: Date, end: Date) {
+  const opts: Intl.DateTimeFormatOptions = {
+    hour: "numeric",
+    minute: "2-digit",
+  };
+  return `${start.toLocaleTimeString(
+    undefined,
+    opts
+  )} – ${end.toLocaleTimeString(undefined, opts)}`;
 }
 
 function addDays(date: Date, n: number) {
@@ -103,9 +115,7 @@ const importanceStyles: Record<Importance, string> = {
 
 function getMonthMatrix(monthDate: Date): Date[][] {
   const startOfMonth = getStartOfMonth(monthDate);
-  const startDayOfWeek = startOfMonth.getDay(); // 0–6
-
-  // First cell is the Sunday on/ before startOfMonth
+  const startDayOfWeek = startOfMonth.getDay();
   const firstCell = addDays(startOfMonth, -startDayOfWeek);
 
   const weeks: Date[][] = [];
@@ -130,7 +140,8 @@ export function PlannerCalendar({
 }) {
   const today = new Date();
 
-  const [viewMode, setViewMode] = useState<ViewMode>("WEEK");
+  // 🔁 Month is default view
+  const [viewMode, setViewMode] = useState<ViewMode>("MONTH");
   const [currentWeekStart, setCurrentWeekStart] = useState(() =>
     getStartOfWeek(today)
   );
@@ -144,6 +155,8 @@ export function PlannerCalendar({
       title: p.title,
       description: p.description,
       startsAt: new Date(p.startsAt),
+      // ⬅️ fix TS error: handle null endsAt by falling back
+      endsAt: p.endsAt ? new Date(p.endsAt) : new Date(p.startsAt),
       importance: p.importance,
       completed: p.completed,
     }))
@@ -165,8 +178,9 @@ export function PlannerCalendar({
   const [formDescription, setFormDescription] = useState("");
   const [formImportance, setFormImportance] = useState<Importance>("MEDIUM");
   const [formRecurrence, setFormRecurrence] = useState<Recurrence>("NONE");
+  const [formStartTime, setFormStartTime] = useState("09:00");
+  const [formEndTime, setFormEndTime] = useState("10:00");
 
-  // dnd-kit sensors for mouse + touch
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
@@ -195,6 +209,22 @@ export function PlannerCalendar({
     [currentMonthDate]
   );
 
+  const activeDate = useMemo(
+    () => addDays(currentWeekStart, activeDayIndex),
+    [currentWeekStart, activeDayIndex]
+  );
+
+  // 👉 Only hours that actually have events for the active day
+  const hoursWithEvents = useMemo(() => {
+    const set = new Set<number>();
+    events.forEach((ev) => {
+      if (isSameDay(ev.startsAt, activeDate)) {
+        set.add(ev.startsAt.getHours());
+      }
+    });
+    return Array.from(set).sort((a, b) => a - b);
+  }, [events, activeDate]);
+
   function openCreateModal(dayIndex: number, hour: number) {
     setSelectedSlot({ dayIndex, hour });
     setModalMode("CREATE");
@@ -203,6 +233,11 @@ export function PlannerCalendar({
     setFormDescription("");
     setFormImportance("MEDIUM");
     setFormRecurrence("NONE");
+    // default start/end around the clicked hour
+    const start = String(hour).padStart(2, "0");
+    const end = String(Math.min(hour + 1, 23)).padStart(2, "0");
+    setFormStartTime(`${start}:00`);
+    setFormEndTime(`${end}:00`);
     setIsModalOpen(true);
   }
 
@@ -213,8 +248,25 @@ export function PlannerCalendar({
     setFormTitle(ev.title);
     setFormDescription(ev.description ?? "");
     setFormImportance(ev.importance);
-    setFormRecurrence("NONE"); // not used for edit
+    setFormRecurrence("NONE");
+
+    const sh = String(ev.startsAt.getHours()).padStart(2, "0");
+    const sm = String(ev.startsAt.getMinutes()).padStart(2, "0");
+    const eh = String(ev.endsAt.getHours()).padStart(2, "0");
+    const em = String(ev.endsAt.getMinutes()).padStart(2, "0");
+    setFormStartTime(`${sh}:${sm}`);
+    setFormEndTime(`${eh}:${em}`);
+
     setIsModalOpen(true);
+  }
+
+  function parseTimeString(date: Date, timeStr: string) {
+    const [hStr, mStr] = timeStr.split(":");
+    const h = Number(hStr) || 0;
+    const m = Number(mStr) || 0;
+    const d = new Date(date);
+    d.setHours(h, m, 0, 0);
+    return d;
   }
 
   async function handleSubmitModal(e: React.FormEvent) {
@@ -224,15 +276,20 @@ export function PlannerCalendar({
     if (modalMode === "CREATE") {
       if (!selectedSlot) return;
 
-      const startsAt = dateFromWeekAndSlot(
-        currentWeekStart,
-        selectedSlot.dayIndex,
-        selectedSlot.hour
-      );
+      const baseDate = weekDates[selectedSlot.dayIndex].date;
+
+      let startsAt = parseTimeString(baseDate, formStartTime);
+      let endsAt = parseTimeString(baseDate, formEndTime);
+
+      // Ensure end is after start; if not, force +1h
+      if (endsAt <= startsAt) {
+        endsAt = new Date(startsAt.getTime() + 60 * 60 * 1000);
+      }
 
       const createdList = await createPlanning({
         title: formTitle.trim(),
         startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
         description: formDescription.trim() || null,
         importance: formImportance,
         recurrence: formRecurrence,
@@ -245,16 +302,35 @@ export function PlannerCalendar({
           title: p.title,
           description: p.description,
           startsAt: new Date(p.startsAt),
+          endsAt: p.endsAt ? new Date(p.endsAt) : new Date(p.startsAt),
           importance: p.importance,
           completed: p.completed,
         })),
       ]);
     } else if (modalMode === "EDIT" && editingEventId) {
+      const existing = events.find((ev) => ev.id === editingEventId);
+      if (!existing) return;
+
+      const baseDate = existing.startsAt;
+      let newStartsAt = parseTimeString(baseDate, formStartTime);
+      let newEndsAt = parseTimeString(baseDate, formEndTime);
+      if (newEndsAt <= newStartsAt) {
+        newEndsAt = new Date(newStartsAt.getTime() + 60 * 60 * 1000);
+      }
+
+      // Title/description/importance
       const updated = await updatePlanningDetails({
         id: editingEventId,
         title: formTitle.trim(),
         description: formDescription.trim() || null,
         importance: formImportance,
+      } as any);
+
+      // Time (start/end)
+      await updatePlanningTime({
+        id: editingEventId,
+        newStartsAt: newStartsAt.toISOString(),
+        newEndsAt: newEndsAt.toISOString(),
       });
 
       setEvents((prev) =>
@@ -266,6 +342,8 @@ export function PlannerCalendar({
                 description: updated.description,
                 importance: updated.importance,
                 completed: updated.completed,
+                startsAt: newStartsAt,
+                endsAt: newEndsAt,
               }
             : ev
         )
@@ -290,8 +368,9 @@ export function PlannerCalendar({
   function eventsForSlot(dayIndex: number, hour: number) {
     const slotDate = addDays(currentWeekStart, dayIndex);
     return events.filter((ev) => {
-      const d = ev.startsAt;
-      return isSameDay(d, slotDate) && d.getHours() === hour;
+      return (
+        isSameDay(ev.startsAt, slotDate) && ev.startsAt.getHours() === hour // only show at START time
+      );
     });
   }
 
@@ -330,11 +409,9 @@ export function PlannerCalendar({
   function clearAll() {
     if (confirm("Clear all plans from this view?")) {
       setEvents([]);
-      // DB still keeps existing; you can add a real "clear week/month" later if you want
     }
   }
 
-  // When switching to month view, sync month date with current week
   function switchToMonth() {
     setViewMode("MONTH");
     setCurrentMonthDate(getStartOfMonth(currentWeekStart));
@@ -345,53 +422,58 @@ export function PlannerCalendar({
     setCurrentWeekStart(getStartOfWeek(currentMonthDate));
   }
 
-  // 🔁 dnd-kit: handle drop on time slots / day pills
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over) return;
 
     const evId = active.id as string;
     const overId = String(over.id);
+    const ev = events.find((e) => e.id === evId);
+    if (!ev) return;
 
-    // Drop on a specific time slot: "slot:dayIndex:hour"
+    const durationMs = ev.endsAt.getTime() - ev.startsAt.getTime();
+
     if (overId.startsWith("slot:")) {
       const [, dayStr, hourStr] = overId.split(":");
       const dayIdx = Number(dayStr);
       const hour = Number(hourStr);
 
       const newStartsAt = dateFromWeekAndSlot(currentWeekStart, dayIdx, hour);
+      const newEndsAt = new Date(newStartsAt.getTime() + durationMs);
 
       setEvents((prev) =>
-        prev.map((ev) =>
-          ev.id === evId ? { ...ev, startsAt: newStartsAt } : ev
+        prev.map((e) =>
+          e.id === evId ? { ...e, startsAt: newStartsAt, endsAt: newEndsAt } : e
         )
       );
 
       updatePlanningTime({
         id: evId,
         newStartsAt: newStartsAt.toISOString(),
+        newEndsAt: newEndsAt.toISOString(),
       }).catch((err) => console.error("Failed to update plan time", err));
 
       return;
     }
 
-    // Drop on a day pill: "day:dayIndex" (keep the same hour)
     if (overId.startsWith("day:")) {
       const [, dayStr] = overId.split(":");
       const dayIdx = Number(dayStr);
-      const ev = events.find((e) => e.id === evId);
-      if (!ev) return;
 
       const hour = ev.startsAt.getHours();
       const newStartsAt = dateFromWeekAndSlot(currentWeekStart, dayIdx, hour);
+      const newEndsAt = new Date(newStartsAt.getTime() + durationMs);
 
       setEvents((prev) =>
-        prev.map((e) => (e.id === evId ? { ...e, startsAt: newStartsAt } : e))
+        prev.map((e) =>
+          e.id === evId ? { ...e, startsAt: newStartsAt, endsAt: newEndsAt } : e
+        )
       );
 
       updatePlanningTime({
         id: evId,
         newStartsAt: newStartsAt.toISOString(),
+        newEndsAt: newEndsAt.toISOString(),
       }).catch((err) =>
         console.error("Failed to move event between days", err)
       );
@@ -399,6 +481,8 @@ export function PlannerCalendar({
       return;
     }
   }
+
+  const defaultCreateHour = 9;
 
   return (
     <div className="space-y-6">
@@ -410,14 +494,13 @@ export function PlannerCalendar({
             <h1 className="text-3xl font-bold">Planner</h1>
           </div>
           <p className="text-sm text-base-content/70">
-            TickTick-style planner. Week view for detailed planning, Month view
-            for a quick overview. Tap a time to add, drag to reschedule, or tap
-            an event to edit.
+            Month is the default view. Click a date to open the detailed week
+            view. Plans have a start and end time and the block grows with the
+            duration.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Week / Month toggle */}
           <div className="join border border-base-300 bg-base-100 text-xs">
             <button
               type="button"
@@ -443,48 +526,37 @@ export function PlannerCalendar({
             </button>
           </div>
 
-          {/* Date range / month nav */}
-          <div className="flex items-center rounded-full border border-base-300 bg-base-100 px-2 py-1 shadow-sm">
+          <div className="join border border-base-300 bg-base-100 text-xs">
             <button
+              type="button"
               onClick={goToPrevious}
-              className="btn btn-ghost btn-xs rounded-full px-2"
+              className="join-item btn btn-xs btn-ghost"
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="h-3 w-3" />
             </button>
-            <span className="px-3 text-sm font-semibold">
-              {viewMode === "WEEK" ? (
-                <>
-                  {currentWeekStart.toLocaleDateString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                  })}{" "}
-                  –{" "}
-                  {addDays(currentWeekStart, 6).toLocaleDateString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
-                </>
-              ) : (
-                currentMonthDate.toLocaleDateString(undefined, {
-                  year: "numeric",
-                  month: "long",
-                })
-              )}
-            </span>
             <button
-              onClick={goToNext}
-              className="btn btn-ghost btn-xs rounded-full px-2"
+              type="button"
+              onClick={goToToday}
+              className="join-item btn btn-xs btn-ghost"
             >
-              <ChevronRight className="h-4 w-4" />
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={goToNext}
+              className="join-item btn btn-xs btn-ghost"
+            >
+              <ChevronRight className="h-3 w-3" />
             </button>
           </div>
 
-          <button onClick={goToToday} className="btn btn-outline btn-sm">
-            Today
-          </button>
-          <button onClick={clearAll} className="btn btn-ghost btn-sm">
-            Clear view
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost text-error"
+            onClick={clearAll}
+          >
+            <Trash2 className="h-3 w-3" />
+            Clear in UI
           </button>
         </div>
       </header>
@@ -497,22 +569,22 @@ export function PlannerCalendar({
         </div>
         <div className="flex items-center gap-1">
           <Clock className="h-3 w-3" />
-          <span>Drag to reschedule (time & day)</span>
+          <span>Drag to reschedule (time &amp; day)</span>
         </div>
       </div>
 
-      {/* dnd context wraps both month + week parts */}
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         {/* ---- MONTH VIEW ---- */}
         {viewMode === "MONTH" && (
           <div className="space-y-4">
             {/* Month grid */}
-            <div className="overflow-x-auto rounded-2xl border border-base-300 bg-base-100 shadow-sm">
-              <div className="min-w-[700px]">
+            <div className="rounded-2xl border border-base-300 bg-base-100 shadow-sm">
+              {/* ⬇️ removed min-w-[700px] so it fits on mobile without horizontal scroll */}
+              <div className="w-full">
                 {/* Weekday header */}
                 <div className="grid grid-cols-7 border-b border-base-300 bg-base-200/70 text-center text-xs font-semibold uppercase tracking-wide text-base-content/70">
                   {DAY_LABELS.map((label) => (
-                    <div key={label} className="px-2 py-2">
+                    <div key={label} className="px-1 py-2">
                       {label}
                     </div>
                   ))}
@@ -539,11 +611,12 @@ export function PlannerCalendar({
                           <button
                             key={dIdx}
                             onClick={() => {
-                              // Sync active day & week to this date
                               setCurrentWeekStart(getStartOfWeek(date));
                               setActiveDayIndex(date.getDay());
+                              // ⬇️ automatically open week view when date is clicked
+                              setViewMode("WEEK");
                             }}
-                            className={`flex min-h-[80px] flex-col items-start border-r border-base-200 px-2 py-2 text-left text-xs last:border-r-0 transition ${
+                            className={`flex min-h-[72px] flex-col items-start border-r border-base-200 px-1 py-2 text-left text-[11px] last:border-r-0 transition ${
                               !inCurrentMonth
                                 ? "bg-base-100/70 text-base-content/40"
                                 : ""
@@ -555,7 +628,7 @@ export function PlannerCalendar({
                           >
                             <div className="mb-1 flex w-full items-center justify-between">
                               <span
-                                className={`flex h-7 w-7 items-center justify-center rounded-full text-sm ${
+                                className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${
                                   isTodayFlag
                                     ? "bg-primary text-primary-content"
                                     : "text-base-content"
@@ -564,18 +637,18 @@ export function PlannerCalendar({
                                 {date.getDate()}
                               </span>
                               {dateEvents.length > 0 && (
-                                <span className="text-[10px] text-base-content/60">
+                                <span className="text-[9px] text-base-content/60">
                                   {dateEvents.length} plan
                                   {dateEvents.length > 1 ? "s" : ""}
                                 </span>
                               )}
                             </div>
 
-                            <div className="flex flex-col gap-1">
+                            <div className="flex flex-col gap-0.5">
                               {dateEvents.slice(0, 3).map((ev) => (
                                 <div
                                   key={ev.id}
-                                  className={`line-clamp-1 rounded-md px-1 py-0.5 text-[10px] ${
+                                  className={`line-clamp-1 rounded-md px-1 py-0.5 text-[9px] ${
                                     importanceStyles[ev.importance]
                                   } ${
                                     ev.completed
@@ -587,7 +660,7 @@ export function PlannerCalendar({
                                 </div>
                               ))}
                               {dateEvents.length > 3 && (
-                                <span className="text-[10px] text-base-content/50">
+                                <span className="text-[9px] text-base-content/50">
                                   +{dateEvents.length - 3} more
                                 </span>
                               )}
@@ -601,7 +674,7 @@ export function PlannerCalendar({
               </div>
             </div>
 
-            {/* Agenda for selected day (under month) */}
+            {/* Day details label (week agenda below is shared with week view) */}
             <div className="text-xs font-semibold text-base-content/70">
               Day details
             </div>
@@ -622,7 +695,7 @@ export function PlannerCalendar({
           ))}
         </div>
 
-        {/* Desktop evenly spaced day strip */}
+        {/* Desktop week strip */}
         <div className="hidden grid-cols-7 gap-3 pb-2 md:grid">
           {weekDates.map((day, idx) => (
             <DayPill
@@ -637,26 +710,42 @@ export function PlannerCalendar({
           ))}
         </div>
 
-        {/* ---- AGENDA VIEW (used for both week & month active day) ---- */}
+        {/* ---- AGENDA VIEW (only show hours that have events) ---- */}
         <div className="space-y-2 max-h-[70vh] overflow-y-auto">
-          {HOURS.map((hour) => {
-            const slotEvents = eventsForSlot(activeDayIndex, hour);
-            return (
-              <TimeSlotRow
-                key={hour}
-                dayIndex={activeDayIndex}
-                hour={hour}
-                events={slotEvents}
-                openCreateModal={openCreateModal}
-                openEditModal={openEditModal}
-                handleDelete={handleDelete}
-              />
-            );
-          })}
+          {hoursWithEvents.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-base-300 bg-base-100 px-3 py-3 text-xs text-base-content/60 flex items-center justify-between">
+              <span>No plans for this day yet.</span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs gap-1"
+                onClick={() =>
+                  openCreateModal(activeDayIndex, defaultCreateHour)
+                }
+              >
+                <Plus className="h-3 w-3" />
+                Add plan
+              </button>
+            </div>
+          ) : (
+            hoursWithEvents.map((hour) => {
+              const slotEvents = eventsForSlot(activeDayIndex, hour);
+              return (
+                <TimeSlotRow
+                  key={hour}
+                  dayIndex={activeDayIndex}
+                  hour={hour}
+                  events={slotEvents}
+                  openCreateModal={openCreateModal}
+                  openEditModal={openEditModal}
+                  handleDelete={handleDelete}
+                />
+              );
+            })
+          )}
         </div>
       </DndContext>
 
-      {/* Add / Edit Plan Modal */}
+      {/* Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-full max-w-md rounded-2xl bg-base-100 p-6 shadow-lg">
@@ -674,10 +763,9 @@ export function PlannerCalendar({
               )}
             </h2>
             {modalMode === "CREATE" && selectedSlot && (
-              <p className="mb-4 text-xs text-base-content/70">
+              <p className="mb-2 text-xs text-base-content/70">
                 {weekDates[selectedSlot.dayIndex].label},{" "}
-                {weekDates[selectedSlot.dayIndex].dateLabel} at{" "}
-                {formatHour(selectedSlot.hour)}
+                {weekDates[selectedSlot.dayIndex].dateLabel}
               </p>
             )}
 
@@ -692,7 +780,7 @@ export function PlannerCalendar({
                   type="text"
                   value={formTitle}
                   onChange={(e) => setFormTitle(e.target.value)}
-                  placeholder="e.g. Go for a run"
+                  placeholder="e.g. Deep work session"
                   className="input input-bordered w-full"
                 />
               </div>
@@ -705,10 +793,36 @@ export function PlannerCalendar({
                 <textarea
                   value={formDescription}
                   onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder="Optional notes..."
+                  placeholder="Optional notes."
                   className="textarea textarea-bordered w-full"
                   rows={3}
                 />
+              </div>
+
+              {/* Time range */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="form-control">
+                  <label className="label">
+                    <span className="label-text text-sm">Start time</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={formStartTime}
+                    onChange={(e) => setFormStartTime(e.target.value)}
+                    className="input input-bordered input-sm w-full"
+                  />
+                </div>
+                <div className="form-control">
+                  <label className="label">
+                    <span className="label-text text-sm">End time</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={formEndTime}
+                    onChange={(e) => setFormEndTime(e.target.value)}
+                    className="input input-bordered input-sm w-full"
+                  />
+                </div>
               </div>
 
               {/* Importance + Recurrence */}
@@ -730,31 +844,29 @@ export function PlannerCalendar({
                   </select>
                 </div>
 
-                {modalMode === "CREATE" && (
-                  <div className="form-control">
-                    <label className="label">
-                      <span className="label-text text-sm">Repeat</span>
-                    </label>
-                    <select
-                      value={formRecurrence}
-                      onChange={(e) =>
-                        setFormRecurrence(e.target.value as Recurrence)
-                      }
-                      className="select select-bordered select-sm w-full"
-                    >
-                      <option value="NONE">None</option>
-                      <option value="DAILY">Daily (7 days)</option>
-                      <option value="WEEKLY">Weekly (4 weeks)</option>
-                    </select>
-                  </div>
-                )}
+                <div className="form-control">
+                  <label className="label">
+                    <span className="label-text text-sm">Recurrence</span>
+                  </label>
+                  <select
+                    value={formRecurrence}
+                    onChange={(e) =>
+                      setFormRecurrence(e.target.value as Recurrence)
+                    }
+                    className="select select-bordered select-sm w-full"
+                  >
+                    <option value="NONE">None</option>
+                    <option value="DAILY">Daily (7 days)</option>
+                    <option value="WEEKLY">Weekly (4 weeks)</option>
+                  </select>
+                </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-4">
+              <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
                   className="btn btn-ghost btn-sm"
+                  onClick={() => setIsModalOpen(false)}
                 >
                   Cancel
                 </button>
@@ -770,7 +882,7 @@ export function PlannerCalendar({
   );
 }
 
-/* ---------- Day pill (droppable for moving events between days) ---------- */
+/* ---------- Day pill ---------- */
 
 type DayPillProps = {
   index: number;
@@ -826,7 +938,7 @@ function DayPill({
   );
 }
 
-/* ---------- Time slot row (droppable per hour) ---------- */
+/* ---------- Time slot row & event card ---------- */
 
 type TimeSlotRowProps = {
   dayIndex: number;
@@ -888,8 +1000,6 @@ function TimeSlotRow({
   );
 }
 
-/* ---------- Draggable event card ---------- */
-
 type PlannerEventCardProps = {
   ev: PlannerEvent;
   onEdit: (ev: PlannerEvent) => void;
@@ -900,72 +1010,73 @@ function PlannerEventCard({ ev, onEdit, onDelete }: PlannerEventCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({ id: ev.id });
 
+  // Height proportional to duration, min 1 hour
+  const durationMs = Math.max(
+    60 * 60 * 1000,
+    ev.endsAt.getTime() - ev.startsAt.getTime()
+  );
+  const durationHours = durationMs / (60 * 60 * 1000);
+
   const style: CSSProperties = {
     transform: transform
       ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
       : undefined,
     opacity: isDragging ? 0.8 : 1,
     boxShadow: isDragging
-      ? "0 12px 30px rgba(0,0,0,0.25)"
-      : "0 2px 8px rgba(0,0,0,0.18)",
-    cursor: "grab",
+      ? "0 10px 25px rgba(0,0,0,0.25)"
+      : "0 2px 4px rgba(0,0,0,0.15)",
+    minHeight: `${durationHours * 2.5}rem`,
   };
 
   return (
     <div
       ref={setNodeRef}
-      style={style}
-      {...listeners}
       {...attributes}
-      className="active:cursor-grabbing"
-      onClick={() => onEdit(ev)}
+      {...listeners}
+      style={style}
+      className={`group rounded-lg border px-3 py-2 text-xs transition hover:border-primary/60 hover:bg-base-200 ${
+        importanceStyles[ev.importance]
+      } ${ev.completed ? "line-through opacity-60" : ""}`}
     >
-      <div
-        className={`flex items-center gap-2 rounded-lg px-2 py-1 text-xs text-base-content ${
-          importanceStyles[ev.importance]
-        } hover:brightness-110 ${ev.completed ? "opacity-60" : ""}`}
-      >
-        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-base-100/70 text-[10px] font-bold">
-          ●
-        </span>
-        <div className="flex-1 truncate">
-          <div
-            className={`font-semibold truncate ${
-              ev.completed ? "line-through" : ""
-            }`}
-          >
-            {ev.title}
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="font-semibold">{ev.title}</div>
+          <div className="text-[10px] text-base-content/60">
+            {formatTimeRange(ev.startsAt, ev.endsAt)}
           </div>
           {ev.description && (
-            <div
-              className={`text-[10px] text-base-content/70 truncate ${
-                ev.completed ? "line-through" : ""
-              }`}
-            >
+            <div className="mt-0.5 text-[11px] text-base-content/70 line-clamp-2">
               {ev.description}
             </div>
           )}
         </div>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit(ev);
-          }}
-          className="p-1 text-base-content/50 hover:text-primary"
-        >
-          <Edit3 className="h-3 w-3" />
-        </button>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(ev.id);
-          }}
-          className="p-1 text-base-content/50 hover:text-error"
-        >
-          <Trash2 className="h-3 w-3" />
-        </button>
+        <div className="flex flex-col items-end gap-1 opacity-0 transition group-hover:opacity-100">
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs p-1"
+            onClick={() => onEdit(ev)}
+          >
+            <Edit3 className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs p-1 text-error"
+            onClick={() => onDelete(ev.id)}
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
+      <div className="mt-1 text-[10px] text-base-content/60">
+        {ev.startsAt.toLocaleTimeString(undefined, {
+          hour: "numeric",
+          minute: "2-digit",
+        })}{" "}
+        –{" "}
+        {ev.endsAt.toLocaleTimeString(undefined, {
+          hour: "numeric",
+          minute: "2-digit",
+        })}
       </div>
     </div>
   );

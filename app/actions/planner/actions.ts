@@ -1,4 +1,3 @@
-// app/planner/actions.ts
 "use server";
 
 import { prisma } from "@/lib/prisma";
@@ -12,21 +11,15 @@ export type PlanningDTO = {
   title: string;
   description: string | null;
   startsAt: string;
-  endsAt: string | null;
+  endsAt?: string | null;
   importance: Importance;
-  completed: boolean; // ✅ used everywhere now
+  completed: boolean;
 };
 
-/**
- * Create one or multiple plans (for recurrence).
- * Recurrence behavior:
- *  - NONE: 1 plan
- *  - DAILY: 7 days in a row
- *  - WEEKLY: 4 weeks in a row (same weekday)
- */
 export async function createPlanning(input: {
   title: string;
-  startsAt: string; // base ISO
+  startsAt: string;
+  endsAt: string; // ⬅️ important
   description?: string | null;
   importance?: Importance;
   recurrence?: Recurrence;
@@ -36,7 +29,13 @@ export async function createPlanning(input: {
     throw new Error("Not authenticated");
   }
 
-  const base = new Date(input.startsAt);
+  const baseStart = new Date(input.startsAt);
+  const baseEnd = new Date(input.endsAt);
+
+  // Make sure duration is at least 1 hour
+  const rawDuration = baseEnd.getTime() - baseStart.getTime();
+  const duration = Math.max(60 * 60 * 1000, rawDuration);
+
   const importance = input.importance ?? "MEDIUM";
   const recurrence = input.recurrence ?? "NONE";
 
@@ -54,12 +53,12 @@ export async function createPlanning(input: {
   const created: PlanningDTO[] = [];
 
   for (let i = 0; i < occurrences; i++) {
-    const startsAtDate = new Date(base);
+    const startsAtDate = new Date(baseStart);
     if (i > 0 && stepDays > 0) {
       startsAtDate.setDate(startsAtDate.getDate() + i * stepDays);
     }
 
-    const endsAtDate = new Date(startsAtDate.getTime() + 60 * 60 * 1000); // +1h
+    const endsAtDate = new Date(startsAtDate.getTime() + duration);
 
     const record = await prisma.planning.create({
       data: {
@@ -69,8 +68,6 @@ export async function createPlanning(input: {
         startsAt: startsAtDate,
         endsAt: endsAtDate,
         importance,
-        // sourceTodoId stays null for planner-created items
-        // completed will default to false from schema, but we can be explicit:
         completed: false,
       },
     });
@@ -82,7 +79,7 @@ export async function createPlanning(input: {
       startsAt: record.startsAt.toISOString(),
       endsAt: record.endsAt ? record.endsAt.toISOString() : null,
       importance: record.importance as Importance,
-      completed: record.completed, // ✅ include
+      completed: record.completed,
     });
   }
 
@@ -91,10 +88,12 @@ export async function createPlanning(input: {
 
 /**
  * Move a plan in time (drag & drop).
+ * We now trust the newStartsAt / newEndsAt coming from the client.
  */
 export async function updatePlanningTime(params: {
   id: string;
-  newStartsAt: string; // ISO string
+  newStartsAt: string;
+  newEndsAt: string;
 }): Promise<PlanningDTO> {
   const user = await stackServerApp.getUser();
   if (!user) {
@@ -110,19 +109,13 @@ export async function updatePlanningTime(params: {
   }
 
   const newStartsAtDate = new Date(params.newStartsAt);
-
-  const duration =
-    existing.endsAt?.getTime() && existing.startsAt
-      ? existing.endsAt.getTime() - existing.startsAt.getTime()
-      : 60 * 60 * 1000; // default 1h
-
-  const newEndsAtDate = new Date(newStartsAtDate.getTime() + duration);
+  const newEndsAtDate = new Date(params.newEndsAt);
 
   const updated = await prisma.planning.update({
     where: { id: params.id },
     data: {
       startsAt: newStartsAtDate,
-      endsAt: existing.endsAt ? newEndsAtDate : null,
+      endsAt: newEndsAtDate,
     },
   });
 
@@ -133,7 +126,7 @@ export async function updatePlanningTime(params: {
     startsAt: updated.startsAt.toISOString(),
     endsAt: updated.endsAt ? updated.endsAt.toISOString() : null,
     importance: updated.importance as Importance,
-    completed: updated.completed, // ✅ keep completion state
+    completed: updated.completed,
   };
 }
 

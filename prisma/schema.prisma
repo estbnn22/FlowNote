@@ -25,17 +25,31 @@ enum Status {
   DONE
 }
 
+model Notebook {
+  id     String @id @default(cuid())
+  userId String
+
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notes Note[]
+}
+
 model Note {
-  id         String     @id @default(cuid())
-  userId     String
+  id     String @id @default(cuid())
+  userId String
+
+  notebookId String?
+  notebook   Notebook? @relation(fields: [notebookId], references: [id])
+
   title      String
-  content    String
+  content    String?
   importance Importance @default(MEDIUM)
   pinned     Boolean    @default(false)
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
 
-  @@index([userId, createdAt])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model ToDo {

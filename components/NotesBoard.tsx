@@ -34,7 +34,7 @@ type NoteDTO = {
   title: string;
   content: string | null;
   importance: Importance;
-  updatedAt: string; // ISO
+  updatedAt: string; // ISO string
   pinned: boolean;
 };
 
@@ -83,6 +83,11 @@ export default function NotesBoard({ initialNotes }: NotesBoardProps) {
   const [onlyPinned, setOnlyPinned] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // ✅ Keep local state in sync with server data when scope (notebookId) changes
+  useEffect(() => {
+    setNotes(initialNotes);
+  }, [initialNotes]);
 
   // ✅ Prevent hydration mismatch: only render board after client mount
   const [mounted, setMounted] = useState(false);
@@ -177,7 +182,7 @@ export default function NotesBoard({ initialNotes }: NotesBoardProps) {
   }
 
   async function handleTogglePin(id: string) {
-    // optimistic pin toggle
+    // optimistic toggle
     setNotes((prev) =>
       prev.map((n) => (n.id === id ? { ...n, pinned: !n.pinned } : n))
     );
@@ -191,38 +196,40 @@ export default function NotesBoard({ initialNotes }: NotesBoardProps) {
     });
   }
 
-  // ⛑️ On server / first hydration, don't render dnd at all
-  if (!mounted) {
-    return null; // or a skeleton if you want
-  }
+  if (!mounted) return null;
 
   return (
     <div className="space-y-4">
-      {/* Toolbar: search + pinned filter */}
+      {/* Filters row */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="w-full md:w-72">
+        <div className="flex flex-1 items-center gap-2 text-xs">
           <input
             type="text"
+            placeholder="Search notes by title or content..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search notes by title or content..."
-            className="w-full rounded-xl border border-base-300 bg-base-200/80 px-3 py-2 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-primary/60"
+            className="w-full rounded-lg border border-base-300 bg-base-200/70 px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary/60"
           />
         </div>
 
-        <div className="flex items-center gap-3 text-xs md:text-sm">
-          <label className="inline-flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={onlyPinned}
-              onChange={(e) => setOnlyPinned(e.target.checked)}
-              className="checkbox checkbox-xs"
-            />
-            <span className="text-neutral/70">Show only pinned notes</span>
-          </label>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <button
+            type="button"
+            onClick={() => setOnlyPinned((v) => !v)}
+            className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 ${
+              onlyPinned
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-base-300 bg-base-200/70 text-neutral/70"
+            }`}
+          >
+            <Pin className="h-3 w-3" />
+            Pinned only
+          </button>
 
           {isPending && (
-            <span className="text-[11px] text-neutral/50">Syncing…</span>
+            <span className="text-[11px] text-neutral/50">
+              Syncing changes…
+            </span>
           )}
         </div>
       </div>
@@ -233,7 +240,7 @@ export default function NotesBoard({ initialNotes }: NotesBoardProps) {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           {COLUMNS.map((col) => {
             const colNotes = getColumnNotes(col.key);
 
@@ -245,7 +252,7 @@ export default function NotesBoard({ initialNotes }: NotesBoardProps) {
               >
                 {colNotes.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-base-300/70 bg-base-100/40 px-3 py-4 text-center text-[11px] text-neutral/60">
-                    Drag a note here or create one above.
+                    No notes here yet.
                   </div>
                 ) : (
                   colNotes.map((note) => (
@@ -285,13 +292,12 @@ function DroppableColumn({
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-h-[220px] flex-col rounded-2xl border ${
+      className={`flex min-h-[260px] flex-col rounded-2xl border ${
         column.borderClass
       } ${column.bgClass} p-3 shadow-sm transition-colors duration-200 ${
         isOver ? "border-primary/60 bg-base-100/70" : ""
       }`}
     >
-      {/* Header */}
       <div className="mb-3 flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
