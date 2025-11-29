@@ -288,36 +288,51 @@ function DroppableColumn({
   children: ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.key });
+  const [open, setOpen] = useState(true);
 
   return (
     <div
-      ref={setNodeRef}
-      className={`flex min-h-[260px] flex-col rounded-2xl border ${
-        column.borderClass
-      } ${column.bgClass} p-3 shadow-sm transition-colors duration-200 ${
-        isOver ? "border-primary/60 bg-base-100/70" : ""
-      }`}
+      className={`rounded-2xl border ${column.borderClass} ${column.bgClass} shadow-sm transition-colors duration-200`}
     >
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-base-100/70 text-neutral/70">
-              {column.label}
-            </span>
-            <span
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${column.headerBadgeClass}`}
-            >
-              {column.key}
-            </span>
-          </div>
-          <p className="mt-1 text-[11px] text-neutral/70">{column.subtitle}</p>
+      {/* Header */}
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between p-3 cursor-pointer"
+      >
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-base-100/70 text-neutral/70">
+            {column.label}
+          </span>
+          <span
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${column.headerBadgeClass}`}
+          >
+            {column.key}
+          </span>
         </div>
-        <span className="text-[11px] text-neutral/60">
-          {count} note{count === 1 ? "" : "s"}
-        </span>
-      </div>
 
-      <div className="flex-1 space-y-2">{children}</div>
+        {/* Count + Chevron */}
+        <div className="flex items-center gap-2 text-[11px] text-neutral/60">
+          {count} note{count === 1 ? "" : "s"}
+          <span
+            className={`transition-transform ${
+              open ? "rotate-180" : "rotate-0"
+            }`}
+          >
+            ▾
+          </span>
+        </div>
+      </button>
+
+      {/* Content */}
+      <div
+        ref={setNodeRef}
+        className={`overflow-hidden transition-all duration-200 ${
+          open ? "max-h-[2000px] p-3" : "max-h-0 px-3"
+        } ${isOver ? "border-primary/60 bg-base-100/70" : ""}`}
+      >
+        <div className="flex-1 space-y-2">{children}</div>
+      </div>
     </div>
   );
 }

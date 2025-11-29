@@ -1050,7 +1050,7 @@ function PlannerEventCard({ ev, onEdit, onDelete }: PlannerEventCardProps) {
             </div>
           )}
         </div>
-        <div className="flex flex-col items-end gap-1 opacity-0 transition group-hover:opacity-100">
+        <div className="flex flex-col items-end gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition">
           <button
             type="button"
             className="btn btn-ghost btn-xs p-1"
