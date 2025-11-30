@@ -17,8 +17,42 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "FlowNote",
-  description: "Interactive dashboard with live todo toggles",
+  title: "FlowNote — Smart Notes, Tasks & Productivity Dashboard",
+  description:
+    "FlowNote is a fast, interactive productivity workspace with notebooks, drag-and-drop todos, real-time status updates, and a clean modern dashboard experience.",
+  keywords: [
+    "notes app",
+    "todo app",
+    "productivity dashboard",
+    "task manager",
+    "notebooks",
+    "Next.js app",
+    "kanban board",
+  ],
+  authors: [{ name: "Esteban M" }],
+  creator: "Esteban M",
+  openGraph: {
+    title: "FlowNote — Smart Productivity Dashboard",
+    description:
+      "Organize notes, manage tasks, and stay productive with drag-and-drop workflows, notebooks, and real-time updates.",
+    url: "https://flow-note-eta.vercel.app/",
+    siteName: "FlowNote",
+    type: "website",
+    images: [
+      {
+        url: "/og-flownote.png",
+        width: 1200,
+        height: 630,
+        alt: "FlowNote — Productivity Dashboard",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "FlowNote — Smart Notes & Tasks",
+    description:
+      "A modern productivity dashboard with notebooks, kanban tasks, and real-time interactions.",
+  },
 };
 
 export default function RootLayout({
