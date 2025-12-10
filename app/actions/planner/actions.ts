@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { stackServerApp } from "@/stack/server";
+import { revalidatePath } from "next/cache";
 
 export type Importance = "LOW" | "MEDIUM" | "HIGH";
 export type Recurrence = "NONE" | "DAILY" | "WEEKLY";
@@ -193,4 +194,36 @@ export async function deletePlanning(id: string): Promise<void> {
   await prisma.planning.delete({
     where: { id },
   });
+}
+
+/**
+ * Wrapper to use createPlanning with a <form action=...>
+ */
+export async function createPlanningFromForm(formData: FormData) {
+  const title = (formData.get("title") as string)?.trim();
+  const description =
+    ((formData.get("description") as string) || "").trim() || null;
+
+  const startsAt = formData.get("startsAt") as string;
+  const endsAt = (formData.get("endsAt") as string) || startsAt;
+
+  const importance =
+    ((formData.get("importance") as string) as Importance) ?? "MEDIUM";
+  const recurrence =
+    ((formData.get("recurrence") as string) as Recurrence) ?? "NONE";
+
+  if (!title || !startsAt) {
+    return;
+  }
+
+  await createPlanning({
+    title,
+    startsAt,
+    endsAt,
+    description,
+    importance,
+    recurrence,
+  });
+
+  revalidatePath("/planner");
 }

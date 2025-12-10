@@ -5,8 +5,7 @@
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
 generator client {
-  provider = "prisma-client"
-  output   = "../app/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -23,6 +22,64 @@ enum Status {
   TODO
   IN_PROGRESS
   DONE
+}
+
+enum HabitFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum HabitType {
+  YES_NO
+  COUNTER
+}
+
+model Habit {
+  id     String @id @default(cuid())
+  userId String
+
+  title       String
+  description String?
+
+  type      HabitType      @default(YES_NO)
+  frequency HabitFrequency @default(DAILY)
+
+  daysOfWeek Int[] @default([])
+
+  targetPerPeriod Int?
+
+  color      String?
+  icon       String?
+  importance Importance? @default(MEDIUM)
+  isArchived Boolean     @default(false)
+
+  logs HabitLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model HabitLog {
+  id      String @id @default(cuid())
+  habitId String
+  userId  String
+
+  // The "day" or period this log represents
+  date  DateTime
+  value Int? // how many times / units done
+  done  Boolean  @default(false)
+  note  String?
+
+  habit Habit @relation(fields: [habitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  // One log per habit per date
+  @@unique([habitId, date])
+  @@index([userId, date])
 }
 
 model Notebook {

@@ -1,10 +1,11 @@
 import Image from "next/image";
 import {
+  BriefcaseBusiness,
   Blocks,
   NotebookPen,
   ListTodo,
   CalendarCheck,
-  Settings,
+  Settings,  
 } from "lucide-react";
 import Link from "next/link";
 
@@ -30,10 +31,16 @@ export default function SideBar({ currentPage = "/" }: SideBarProps) {
       icon: ListTodo,
     },
     {
+      name: "Habits",
+      href: "/habits",
+      icon: BriefcaseBusiness,
+    },
+    {
       name: "Planner",
       href: "/planner",
       icon: CalendarCheck,
     },
+
     {
       name: "Settings",
       href: "/settings",

@@ -41,11 +41,12 @@ type Props = {
   initialTodos: Todo[];
   savedId?: string;
 };
+
 type DueTone = "error" | "warning" | "info";
 
 const importanceOrder: ImportanceValue[] = ["HIGH", "MEDIUM", "LOW"];
 
-export default function TodoBoard({ initialTodos, savedId }: Props) {
+export default function TodoBoard({ initialTodos }: Props) {
   const [isPending, startTransition] = useTransition();
   const [todos, setTodos] = useState<Todo[]>(initialTodos);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -203,7 +204,7 @@ export default function TodoBoard({ initialTodos, savedId }: Props) {
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      {/* Better mobile spacing + cleaner desktop layout */}
+      {/* Simpler layout but still grouped by priority */}
       <section className="grid grid-cols-1 gap-4 md:grid-cols-3 md:gap-6">
         {importanceOrder.map((imp) => {
           const group =
@@ -246,17 +247,39 @@ export default function TodoBoard({ initialTodos, savedId }: Props) {
                     return (
                       <DraggableCard key={todo.id} id={todo.id}>
                         <article className="rounded-xl border border-base-300/70 bg-base-200/70 p-3 text-xs shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                          <form action={updateTodo} className="space-y-3">
+                          <form action={updateTodo} className="space-y-2">
                             <input type="hidden" name="id" value={todo.id} />
                             <input
                               type="hidden"
                               name="currentStatus"
                               value={todo.status}
                             />
+                            {/* keep these hidden so updateTodo still receives all fields */}
+                            <input
+                              type="hidden"
+                              name="title"
+                              value={todo.title}
+                            />
+                            <input
+                              type="hidden"
+                              name="importance"
+                              value={todo.importance}
+                            />
+                            <input
+                              type="hidden"
+                              name="dueAt"
+                              value={
+                                todo.dueAt
+                                  ? new Date(todo.dueAt)
+                                      .toISOString()
+                                      .slice(0, 16)
+                                  : ""
+                              }
+                            />
 
-                            {/* Row 1: checkbox + title + status badge */}
+                            {/* Row 1: checkbox + title + status pill */}
                             <div className="flex items-start gap-2">
-                              <label className="flex flex-1 items-center gap-2">
+                              <label className="flex items-center gap-2 flex-1">
                                 <input
                                   type="checkbox"
                                   name="completed"
@@ -266,14 +289,15 @@ export default function TodoBoard({ initialTodos, savedId }: Props) {
                                     e.currentTarget.form?.requestSubmit()
                                   }
                                 />
-
-                                <input
-                                  name="title"
-                                  defaultValue={todo.title}
-                                  className={`w-full rounded-lg bg-base-300/60 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/60 ${
-                                    isDone ? "line-through text-neutral/50" : ""
+                                <span
+                                  className={`text-xs ${
+                                    isDone
+                                      ? "line-through text-neutral/50"
+                                      : "text-slate-50"
                                   }`}
-                                />
+                                >
+                                  {todo.title}
+                                </span>
                               </label>
 
                               <span
@@ -286,78 +310,50 @@ export default function TodoBoard({ initialTodos, savedId }: Props) {
                               </span>
                             </div>
 
-                            {/* Row 2: importance + due date */}
+                            {/* Row 2: small badges for importance + due info */}
                             <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-1 text-[11px] text-neutral/70">
-                                Importance:
-                                <select
-                                  name="importance"
-                                  defaultValue={todo.importance}
-                                  className="rounded-lg bg-base-300/60 px-2 py-1 text-[11px]"
-                                >
-                                  <option value="LOW">Low</option>
-                                  <option value="MEDIUM">Medium</option>
-                                  <option value="HIGH">High</option>
-                                </select>
-                              </div>
+                              <span className="inline-flex items-center gap-1 rounded-full bg-base-300/70 px-2 py-0.5 text-[10px] text-neutral/70">
+                                <CircleDot className="h-3 w-3" />
+                                {todo.importance === "HIGH"
+                                  ? "High priority"
+                                  : todo.importance === "MEDIUM"
+                                  ? "Medium priority"
+                                  : "Low priority"}
+                              </span>
 
-                              <div className="flex items-center gap-2 text-[11px] text-neutral/70">
-                                <CalendarClock className="h-3 w-3" />
-                                <input
-                                  type="datetime-local"
-                                  name="dueAt"
-                                  defaultValue={
-                                    todo.dueAt
-                                      ? new Date(todo.dueAt)
-                                          .toISOString()
-                                          .slice(0, 16)
-                                      : ""
-                                  }
-                                  className="rounded-lg bg-base-300/60 px-2 py-1 text-[11px]"
-                                />
-                              </div>
+                              {dueInfo ? (
+                                <span
+                                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${getDueClasses(
+                                    dueInfo.tone
+                                  )}`}
+                                >
+                                  <CalendarClock className="h-3 w-3" />
+                                  {dueInfo.label}
+                                </span>
+                              ) : null}
                             </div>
 
-                            {/* Row 3: buttons + due info */}
+                            {/* Row 3: simple controls */}
                             <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="submit"
-                                  disabled={isPending}
-                                  className="rounded-lg bg-primary px-3 py-1 text-[11px] font-semibold text-primary-content hover:bg-primary-focus"
-                                >
-                                  Save
-                                </button>
+                              <button
+                                type="submit"
+                                formAction={toggleTodoStatus}
+                                disabled={isPending}
+                                className="inline-flex items-center gap-1 rounded-lg bg-base-300 px-3 py-1 text-[10px] hover:bg-base-100"
+                              >
+                                <Zap className="h-3 w-3" />
+                                {getNextStatusLabel(todo.status)}
+                              </button>
 
-                                <button
-                                  type="submit"
-                                  formAction={toggleTodoStatus}
-                                  disabled={isPending}
-                                  className="inline-flex items-center gap-1 rounded-lg bg-base-300 px-3 py-1 text-[10px] hover:bg-base-100"
-                                >
-                                  <Zap className="h-3 w-3" />
-                                  {getNextStatusLabel(todo.status)}
-                                </button>
-                              </div>
-
-                              <div className="flex items-center gap-2">
-                                {dueInfo ? (
-                                  <span className={getDueClasses(dueInfo.tone)}>
-                                    <CalendarClock className="h-3 w-3" />
-                                    {dueInfo.label}
-                                  </span>
-                                ) : null}
-
-                                <button
-                                  type="submit"
-                                  formAction={deleteTodo}
-                                  disabled={isPending}
-                                  className="inline-flex items-center gap-1 rounded-lg border border-error/60 bg-error/10 px-2 py-1 text-[10px] font-semibold text-error hover:bg-error/20"
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                  Delete
-                                </button>
-                              </div>
+                              <button
+                                type="submit"
+                                formAction={deleteTodo}
+                                disabled={isPending}
+                                className="inline-flex items-center gap-1 rounded-lg border border-error/60 bg-error/10 px-2 py-1 text-[10px] font-semibold text-error hover:bg-error/20"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                                Delete
+                              </button>
                             </div>
                           </form>
                         </article>
@@ -393,7 +389,6 @@ function DroppableColumn({
 }: DroppableColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
-  // A soft tint so each column feels visually separate
   const accentClasses =
     id === "HIGH"
       ? "bg-error/10 border-error/40"

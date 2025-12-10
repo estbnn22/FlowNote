@@ -1,1083 +1,520 @@
 "use client";
 
-import React, { useMemo, useState, CSSProperties } from "react";
-import {
-  CalendarDays,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  Plus,
-  Trash2,
-  Edit3,
-} from "lucide-react";
-import {
-  createPlanning,
-  updatePlanningTime,
-  deletePlanning,
-  updatePlanningDetails,
-  type PlanningDTO,
-  type Importance,
-  type Recurrence,
-} from "../actions/planner/actions";
+import { useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
-import {
-  DndContext,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-  useDroppable,
-  useDraggable,
-} from "@dnd-kit/core";
-
-type PlannerEvent = {
+type PlanEvent = {
   id: string;
   title: string;
   description: string | null;
-  startsAt: Date;
-  endsAt: Date;
-  importance: Importance;
+  startsAt: string;
+  endsAt: string | null;
+  importance: string | any;
   completed: boolean;
 };
 
-const HOURS = Array.from({ length: 24 }, (_, i) => i);
-const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-type ViewMode = "WEEK" | "MONTH";
-
-function getStartOfWeek(date: Date) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = d.getDate() - day;
-  d.setDate(diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function getStartOfMonth(date: Date) {
-  const d = new Date(date.getFullYear(), date.getMonth(), 1);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function formatHour(hour: number) {
-  const suffix = hour >= 12 ? "PM" : "AM";
-  const h12 = hour % 12 === 0 ? 12 : hour % 12;
-  return `${h12}:00 ${suffix}`;
-}
-
-function formatTimeRange(start: Date, end: Date) {
-  const opts: Intl.DateTimeFormatOptions = {
-    hour: "numeric",
-    minute: "2-digit",
-  };
-  return `${start.toLocaleTimeString(
-    undefined,
-    opts
-  )} – ${end.toLocaleTimeString(undefined, opts)}`;
-}
-
-function addDays(date: Date, n: number) {
-  const d = new Date(date);
-  d.setDate(d.getDate() + n);
-  return d;
-}
-
-function addMonths(date: Date, n: number) {
-  const d = new Date(date);
-  d.setMonth(d.getMonth() + n);
-  return d;
-}
-
-function dateFromWeekAndSlot(
-  weekStart: Date,
-  dayIndex: number,
-  hour: number
-): Date {
-  const d = addDays(weekStart, dayIndex);
-  d.setHours(hour, 0, 0, 0);
-  return d;
-}
-
-function isSameDay(d1: Date, d2: Date) {
-  return (
-    d1.getFullYear() === d2.getFullYear() &&
-    d1.getMonth() === d2.getMonth() &&
-    d1.getDate() === d2.getDate()
-  );
-}
-
-const importanceStyles: Record<Importance, string> = {
-  HIGH: "bg-error/15 border border-error/40",
-  MEDIUM: "bg-primary/10 border border-primary/30",
-  LOW: "bg-success/10 border border-success/30",
+type TodoEvent = {
+  id: string;
+  title: string;
+  description: string | null;
+  dueDate: string | null;
+  importance: string | any;
+  status: string;
 };
 
-function getMonthMatrix(monthDate: Date): Date[][] {
-  const startOfMonth = getStartOfMonth(monthDate);
-  const startDayOfWeek = startOfMonth.getDay();
-  const firstCell = addDays(startOfMonth, -startDayOfWeek);
-
-  const weeks: Date[][] = [];
-  let current = firstCell;
-
-  for (let w = 0; w < 6; w++) {
-    const week: Date[] = [];
-    for (let d = 0; d < 7; d++) {
-      week.push(new Date(current));
-      current = addDays(current, 1);
-    }
-    weeks.push(week);
-  }
-
-  return weeks;
-}
-
-export function PlannerCalendar({
-  initialPlans,
-}: {
-  initialPlans: PlanningDTO[];
-}) {
-  const today = new Date();
-
-  // 🔁 Month is default view
-  const [viewMode, setViewMode] = useState<ViewMode>("MONTH");
-  const [currentWeekStart, setCurrentWeekStart] = useState(() =>
-    getStartOfWeek(today)
-  );
-  const [currentMonthDate, setCurrentMonthDate] = useState(() =>
-    getStartOfMonth(today)
-  );
-
-  const [events, setEvents] = useState<PlannerEvent[]>(() =>
-    initialPlans.map((p) => ({
-      id: p.id,
-      title: p.title,
-      description: p.description,
-      startsAt: new Date(p.startsAt),
-      // ⬅️ fix TS error: handle null endsAt by falling back
-      endsAt: p.endsAt ? new Date(p.endsAt) : new Date(p.startsAt),
-      importance: p.importance,
-      completed: p.completed,
-    }))
-  );
-
-  const [activeDayIndex, setActiveDayIndex] = useState(() => today.getDay());
-
-  // Modal state
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<"CREATE" | "EDIT">("CREATE");
-  const [selectedSlot, setSelectedSlot] = useState<{
-    dayIndex: number;
-    hour: number;
-  } | null>(null);
-  const [editingEventId, setEditingEventId] = useState<string | null>(null);
-
-  // Form fields
-  const [formTitle, setFormTitle] = useState("");
-  const [formDescription, setFormDescription] = useState("");
-  const [formImportance, setFormImportance] = useState<Importance>("MEDIUM");
-  const [formRecurrence, setFormRecurrence] = useState<Recurrence>("NONE");
-  const [formStartTime, setFormStartTime] = useState("09:00");
-  const [formEndTime, setFormEndTime] = useState("10:00");
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
-    })
-  );
-
-  const weekDates = useMemo(
-    () =>
-      DAY_LABELS.map((_, idx) => {
-        const d = addDays(currentWeekStart, idx);
-        return {
-          label: DAY_LABELS[idx],
-          date: d,
-          dateLabel: d.toLocaleDateString(undefined, {
-            month: "short",
-            day: "numeric",
-          }),
-          dayNumber: d.getDate(),
-        };
-      }),
-    [currentWeekStart]
-  );
-
-  const monthMatrix = useMemo(
-    () => getMonthMatrix(currentMonthDate),
-    [currentMonthDate]
-  );
-
-  const activeDate = useMemo(
-    () => addDays(currentWeekStart, activeDayIndex),
-    [currentWeekStart, activeDayIndex]
-  );
-
-  // 👉 Only hours that actually have events for the active day
-  const hoursWithEvents = useMemo(() => {
-    const set = new Set<number>();
-    events.forEach((ev) => {
-      if (isSameDay(ev.startsAt, activeDate)) {
-        set.add(ev.startsAt.getHours());
-      }
-    });
-    return Array.from(set).sort((a, b) => a - b);
-  }, [events, activeDate]);
-
-  function openCreateModal(dayIndex: number, hour: number) {
-    setSelectedSlot({ dayIndex, hour });
-    setModalMode("CREATE");
-    setEditingEventId(null);
-    setFormTitle("");
-    setFormDescription("");
-    setFormImportance("MEDIUM");
-    setFormRecurrence("NONE");
-    // default start/end around the clicked hour
-    const start = String(hour).padStart(2, "0");
-    const end = String(Math.min(hour + 1, 23)).padStart(2, "0");
-    setFormStartTime(`${start}:00`);
-    setFormEndTime(`${end}:00`);
-    setIsModalOpen(true);
-  }
-
-  function openEditModal(ev: PlannerEvent) {
-    setModalMode("EDIT");
-    setEditingEventId(ev.id);
-    setSelectedSlot(null);
-    setFormTitle(ev.title);
-    setFormDescription(ev.description ?? "");
-    setFormImportance(ev.importance);
-    setFormRecurrence("NONE");
-
-    const sh = String(ev.startsAt.getHours()).padStart(2, "0");
-    const sm = String(ev.startsAt.getMinutes()).padStart(2, "0");
-    const eh = String(ev.endsAt.getHours()).padStart(2, "0");
-    const em = String(ev.endsAt.getMinutes()).padStart(2, "0");
-    setFormStartTime(`${sh}:${sm}`);
-    setFormEndTime(`${eh}:${em}`);
-
-    setIsModalOpen(true);
-  }
-
-  function parseTimeString(date: Date, timeStr: string) {
-    const [hStr, mStr] = timeStr.split(":");
-    const h = Number(hStr) || 0;
-    const m = Number(mStr) || 0;
-    const d = new Date(date);
-    d.setHours(h, m, 0, 0);
-    return d;
-  }
-
-  async function handleSubmitModal(e: React.FormEvent) {
-    e.preventDefault();
-    if (!formTitle.trim()) return;
-
-    if (modalMode === "CREATE") {
-      if (!selectedSlot) return;
-
-      const baseDate = weekDates[selectedSlot.dayIndex].date;
-
-      let startsAt = parseTimeString(baseDate, formStartTime);
-      let endsAt = parseTimeString(baseDate, formEndTime);
-
-      // Ensure end is after start; if not, force +1h
-      if (endsAt <= startsAt) {
-        endsAt = new Date(startsAt.getTime() + 60 * 60 * 1000);
-      }
-
-      const createdList = await createPlanning({
-        title: formTitle.trim(),
-        startsAt: startsAt.toISOString(),
-        endsAt: endsAt.toISOString(),
-        description: formDescription.trim() || null,
-        importance: formImportance,
-        recurrence: formRecurrence,
-      });
-
-      setEvents((prev) => [
-        ...prev,
-        ...createdList.map((p) => ({
-          id: p.id,
-          title: p.title,
-          description: p.description,
-          startsAt: new Date(p.startsAt),
-          endsAt: p.endsAt ? new Date(p.endsAt) : new Date(p.startsAt),
-          importance: p.importance,
-          completed: p.completed,
-        })),
-      ]);
-    } else if (modalMode === "EDIT" && editingEventId) {
-      const existing = events.find((ev) => ev.id === editingEventId);
-      if (!existing) return;
-
-      const baseDate = existing.startsAt;
-      let newStartsAt = parseTimeString(baseDate, formStartTime);
-      let newEndsAt = parseTimeString(baseDate, formEndTime);
-      if (newEndsAt <= newStartsAt) {
-        newEndsAt = new Date(newStartsAt.getTime() + 60 * 60 * 1000);
-      }
-
-      // Title/description/importance
-      const updated = await updatePlanningDetails({
-        id: editingEventId,
-        title: formTitle.trim(),
-        description: formDescription.trim() || null,
-        importance: formImportance,
-      } as any);
-
-      // Time (start/end)
-      await updatePlanningTime({
-        id: editingEventId,
-        newStartsAt: newStartsAt.toISOString(),
-        newEndsAt: newEndsAt.toISOString(),
-      });
-
-      setEvents((prev) =>
-        prev.map((ev) =>
-          ev.id === updated.id
-            ? {
-                ...ev,
-                title: updated.title,
-                description: updated.description,
-                importance: updated.importance,
-                completed: updated.completed,
-                startsAt: newStartsAt,
-                endsAt: newEndsAt,
-              }
-            : ev
-        )
-      );
-    }
-
-    setIsModalOpen(false);
-  }
-
-  async function handleDelete(eventId: string) {
-    const ok = window.confirm("Delete this plan?");
-    if (!ok) return;
-
-    setEvents((prev) => prev.filter((ev) => ev.id !== eventId));
-    try {
-      await deletePlanning(eventId);
-    } catch (err) {
-      console.error("Failed to delete plan", err);
-    }
-  }
-
-  function eventsForSlot(dayIndex: number, hour: number) {
-    const slotDate = addDays(currentWeekStart, dayIndex);
-    return events.filter((ev) => {
-      return (
-        isSameDay(ev.startsAt, slotDate) && ev.startsAt.getHours() === hour // only show at START time
-      );
-    });
-  }
-
-  function eventsForDate(date: Date) {
-    return events.filter((ev) => isSameDay(ev.startsAt, date));
-  }
-
-  function goToPrevious() {
-    if (viewMode === "WEEK") {
-      setCurrentWeekStart((prev) => addDays(prev, -7));
-    } else {
-      setCurrentMonthDate((prev) => addMonths(prev, -1));
-    }
-  }
-
-  function goToNext() {
-    if (viewMode === "WEEK") {
-      setCurrentWeekStart((prev) => addDays(prev, 7));
-    } else {
-      setCurrentMonthDate((prev) => addMonths(prev, 1));
-    }
-  }
-
-  function goToToday() {
-    const t = new Date();
-    if (viewMode === "WEEK") {
-      setCurrentWeekStart(getStartOfWeek(t));
-      setActiveDayIndex(t.getDay());
-    } else {
-      setCurrentMonthDate(getStartOfMonth(t));
-      setCurrentWeekStart(getStartOfWeek(t));
-      setActiveDayIndex(t.getDay());
-    }
-  }
-
-  function clearAll() {
-    if (confirm("Clear all plans from this view?")) {
-      setEvents([]);
-    }
-  }
-
-  function switchToMonth() {
-    setViewMode("MONTH");
-    setCurrentMonthDate(getStartOfMonth(currentWeekStart));
-  }
-
-  function switchToWeek() {
-    setViewMode("WEEK");
-    setCurrentWeekStart(getStartOfWeek(currentMonthDate));
-  }
-
-  function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over) return;
-
-    const evId = active.id as string;
-    const overId = String(over.id);
-    const ev = events.find((e) => e.id === evId);
-    if (!ev) return;
-
-    const durationMs = ev.endsAt.getTime() - ev.startsAt.getTime();
-
-    if (overId.startsWith("slot:")) {
-      const [, dayStr, hourStr] = overId.split(":");
-      const dayIdx = Number(dayStr);
-      const hour = Number(hourStr);
-
-      const newStartsAt = dateFromWeekAndSlot(currentWeekStart, dayIdx, hour);
-      const newEndsAt = new Date(newStartsAt.getTime() + durationMs);
-
-      setEvents((prev) =>
-        prev.map((e) =>
-          e.id === evId ? { ...e, startsAt: newStartsAt, endsAt: newEndsAt } : e
-        )
-      );
-
-      updatePlanningTime({
-        id: evId,
-        newStartsAt: newStartsAt.toISOString(),
-        newEndsAt: newEndsAt.toISOString(),
-      }).catch((err) => console.error("Failed to update plan time", err));
-
-      return;
-    }
-
-    if (overId.startsWith("day:")) {
-      const [, dayStr] = overId.split(":");
-      const dayIdx = Number(dayStr);
-
-      const hour = ev.startsAt.getHours();
-      const newStartsAt = dateFromWeekAndSlot(currentWeekStart, dayIdx, hour);
-      const newEndsAt = new Date(newStartsAt.getTime() + durationMs);
-
-      setEvents((prev) =>
-        prev.map((e) =>
-          e.id === evId ? { ...e, startsAt: newStartsAt, endsAt: newEndsAt } : e
-        )
-      );
-
-      updatePlanningTime({
-        id: evId,
-        newStartsAt: newStartsAt.toISOString(),
-        newEndsAt: newEndsAt.toISOString(),
-      }).catch((err) =>
-        console.error("Failed to move event between days", err)
-      );
-
-      return;
-    }
-  }
-
-  const defaultCreateHour = 9;
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <CalendarDays className="h-7 w-7 text-primary" />
-            <h1 className="text-3xl font-bold">Planner</h1>
-          </div>
-          <p className="text-sm text-base-content/70">
-            Month is the default view. Click a date to open the detailed week
-            view. Plans have a start and end time and the block grows with the
-            duration.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="join border border-base-300 bg-base-100 text-xs">
-            <button
-              type="button"
-              onClick={switchToWeek}
-              className={`join-item btn btn-xs ${
-                viewMode === "WEEK"
-                  ? "btn-primary text-primary-content"
-                  : "btn-ghost"
-              }`}
-            >
-              Week
-            </button>
-            <button
-              type="button"
-              onClick={switchToMonth}
-              className={`join-item btn btn-xs ${
-                viewMode === "MONTH"
-                  ? "btn-primary text-primary-content"
-                  : "btn-ghost"
-              }`}
-            >
-              Month
-            </button>
-          </div>
-
-          <div className="join border border-base-300 bg-base-100 text-xs">
-            <button
-              type="button"
-              onClick={goToPrevious}
-              className="join-item btn btn-xs btn-ghost"
-            >
-              <ChevronLeft className="h-3 w-3" />
-            </button>
-            <button
-              type="button"
-              onClick={goToToday}
-              className="join-item btn btn-xs btn-ghost"
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              onClick={goToNext}
-              className="join-item btn btn-xs btn-ghost"
-            >
-              <ChevronRight className="h-3 w-3" />
-            </button>
-          </div>
-
-          <button
-            type="button"
-            className="btn btn-xs btn-ghost text-error"
-            onClick={clearAll}
-          >
-            <Trash2 className="h-3 w-3" />
-            Clear in UI
-          </button>
-        </div>
-      </header>
-
-      {/* Legend */}
-      <div className="flex flex-wrap items-center gap-4 text-xs text-base-content/60">
-        <div className="flex items-center gap-1">
-          <span className="h-3 w-3 rounded bg-primary/80" />
-          <span>Planned activity</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <Clock className="h-3 w-3" />
-          <span>Drag to reschedule (time &amp; day)</span>
-        </div>
-      </div>
-
-      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-        {/* ---- MONTH VIEW ---- */}
-        {viewMode === "MONTH" && (
-          <div className="space-y-4">
-            {/* Month grid */}
-            <div className="rounded-2xl border border-base-300 bg-base-100 shadow-sm">
-              {/* ⬇️ removed min-w-[700px] so it fits on mobile without horizontal scroll */}
-              <div className="w-full">
-                {/* Weekday header */}
-                <div className="grid grid-cols-7 border-b border-base-300 bg-base-200/70 text-center text-xs font-semibold uppercase tracking-wide text-base-content/70">
-                  {DAY_LABELS.map((label) => (
-                    <div key={label} className="px-1 py-2">
-                      {label}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Weeks */}
-                <div className="grid grid-rows-6">
-                  {monthMatrix.map((week, wIdx) => (
-                    <div
-                      key={wIdx}
-                      className="grid grid-cols-7 border-b border-base-200 last:border-b-0"
-                    >
-                      {week.map((date, dIdx) => {
-                        const inCurrentMonth =
-                          date.getMonth() === currentMonthDate.getMonth();
-                        const isTodayFlag = isSameDay(date, today);
-                        const dateEvents = eventsForDate(date);
-                        const isActive = isSameDay(
-                          date,
-                          addDays(currentWeekStart, activeDayIndex)
-                        );
-
-                        return (
-                          <button
-                            key={dIdx}
-                            onClick={() => {
-                              setCurrentWeekStart(getStartOfWeek(date));
-                              setActiveDayIndex(date.getDay());
-                              // ⬇️ automatically open week view when date is clicked
-                              setViewMode("WEEK");
-                            }}
-                            className={`flex min-h-[72px] flex-col items-start border-r border-base-200 px-1 py-2 text-left text-[11px] last:border-r-0 transition ${
-                              !inCurrentMonth
-                                ? "bg-base-100/70 text-base-content/40"
-                                : ""
-                            } ${
-                              isActive
-                                ? "ring-2 ring-primary/60 ring-offset-2"
-                                : ""
-                            }`}
-                          >
-                            <div className="mb-1 flex w-full items-center justify-between">
-                              <span
-                                className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${
-                                  isTodayFlag
-                                    ? "bg-primary text-primary-content"
-                                    : "text-base-content"
-                                }`}
-                              >
-                                {date.getDate()}
-                              </span>
-                              {dateEvents.length > 0 && (
-                                <span className="text-[9px] text-base-content/60">
-                                  {dateEvents.length} plan
-                                  {dateEvents.length > 1 ? "s" : ""}
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex flex-col gap-0.5">
-                              {dateEvents.slice(0, 3).map((ev) => (
-                                <div
-                                  key={ev.id}
-                                  className={`line-clamp-1 rounded-md px-1 py-0.5 text-[9px] ${
-                                    importanceStyles[ev.importance]
-                                  } ${
-                                    ev.completed
-                                      ? "line-through opacity-60"
-                                      : ""
-                                  }`}
-                                >
-                                  {ev.title}
-                                </div>
-                              ))}
-                              {dateEvents.length > 3 && (
-                                <span className="text-[9px] text-base-content/50">
-                                  +{dateEvents.length - 3} more
-                                </span>
-                              )}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Day details label (week agenda below is shared with week view) */}
-            <div className="text-xs font-semibold text-base-content/70">
-              Day details
-            </div>
-          </div>
-        )}
-
-        {/* ---- WEEK VIEW DAY STRIP (mobile) ---- */}
-        <div className="flex gap-2 overflow-x-auto pb-1 md:hidden">
-          {weekDates.map((day, idx) => (
-            <DayPill
-              key={idx}
-              index={idx}
-              day={day}
-              today={today}
-              activeDayIndex={activeDayIndex}
-              setActiveDayIndex={setActiveDayIndex}
-            />
-          ))}
-        </div>
-
-        {/* Desktop week strip */}
-        <div className="hidden grid-cols-7 gap-3 pb-2 md:grid">
-          {weekDates.map((day, idx) => (
-            <DayPill
-              key={idx}
-              index={idx}
-              day={day}
-              today={today}
-              activeDayIndex={activeDayIndex}
-              setActiveDayIndex={setActiveDayIndex}
-              showDateLabel
-            />
-          ))}
-        </div>
-
-        {/* ---- AGENDA VIEW (only show hours that have events) ---- */}
-        <div className="space-y-2 max-h-[70vh] overflow-y-auto">
-          {hoursWithEvents.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-base-300 bg-base-100 px-3 py-3 text-xs text-base-content/60 flex items-center justify-between">
-              <span>No plans for this day yet.</span>
-              <button
-                type="button"
-                className="btn btn-ghost btn-xs gap-1"
-                onClick={() =>
-                  openCreateModal(activeDayIndex, defaultCreateHour)
-                }
-              >
-                <Plus className="h-3 w-3" />
-                Add plan
-              </button>
-            </div>
-          ) : (
-            hoursWithEvents.map((hour) => {
-              const slotEvents = eventsForSlot(activeDayIndex, hour);
-              return (
-                <TimeSlotRow
-                  key={hour}
-                  dayIndex={activeDayIndex}
-                  hour={hour}
-                  events={slotEvents}
-                  openCreateModal={openCreateModal}
-                  openEditModal={openEditModal}
-                  handleDelete={handleDelete}
-                />
-              );
-            })
-          )}
-        </div>
-      </DndContext>
-
-      {/* Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-md rounded-2xl bg-base-100 p-6 shadow-lg">
-            <h2 className="mb-2 flex items-center gap-2 text-xl font-semibold">
-              {modalMode === "CREATE" ? (
-                <>
-                  <Plus className="h-5 w-5 text-primary" />
-                  Add Plan
-                </>
-              ) : (
-                <>
-                  <Edit3 className="h-5 w-5 text-primary" />
-                  Edit Plan
-                </>
-              )}
-            </h2>
-            {modalMode === "CREATE" && selectedSlot && (
-              <p className="mb-2 text-xs text-base-content/70">
-                {weekDates[selectedSlot.dayIndex].label},{" "}
-                {weekDates[selectedSlot.dayIndex].dateLabel}
-              </p>
-            )}
-
-            <form onSubmit={handleSubmitModal} className="space-y-4">
-              {/* Title */}
-              <div className="form-control">
-                <label className="label">
-                  <span className="label-text text-sm">Title</span>
-                </label>
-                <input
-                  autoFocus
-                  type="text"
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
-                  placeholder="e.g. Deep work session"
-                  className="input input-bordered w-full"
-                />
-              </div>
-
-              {/* Description */}
-              <div className="form-control">
-                <label className="label">
-                  <span className="label-text text-sm">Description</span>
-                </label>
-                <textarea
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder="Optional notes."
-                  className="textarea textarea-bordered w-full"
-                  rows={3}
-                />
-              </div>
-
-              {/* Time range */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="form-control">
-                  <label className="label">
-                    <span className="label-text text-sm">Start time</span>
-                  </label>
-                  <input
-                    type="time"
-                    value={formStartTime}
-                    onChange={(e) => setFormStartTime(e.target.value)}
-                    className="input input-bordered input-sm w-full"
-                  />
-                </div>
-                <div className="form-control">
-                  <label className="label">
-                    <span className="label-text text-sm">End time</span>
-                  </label>
-                  <input
-                    type="time"
-                    value={formEndTime}
-                    onChange={(e) => setFormEndTime(e.target.value)}
-                    className="input input-bordered input-sm w-full"
-                  />
-                </div>
-              </div>
-
-              {/* Importance + Recurrence */}
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div className="form-control">
-                  <label className="label">
-                    <span className="label-text text-sm">Importance</span>
-                  </label>
-                  <select
-                    value={formImportance}
-                    onChange={(e) =>
-                      setFormImportance(e.target.value as Importance)
-                    }
-                    className="select select-bordered select-sm w-full"
-                  >
-                    <option value="LOW">Low</option>
-                    <option value="MEDIUM">Medium</option>
-                    <option value="HIGH">High</option>
-                  </select>
-                </div>
-
-                <div className="form-control">
-                  <label className="label">
-                    <span className="label-text text-sm">Recurrence</span>
-                  </label>
-                  <select
-                    value={formRecurrence}
-                    onChange={(e) =>
-                      setFormRecurrence(e.target.value as Recurrence)
-                    }
-                    className="select select-bordered select-sm w-full"
-                  >
-                    <option value="NONE">None</option>
-                    <option value="DAILY">Daily (7 days)</option>
-                    <option value="WEEKLY">Weekly (4 weeks)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => setIsModalOpen(false)}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  {modalMode === "CREATE" ? "Save Plan(s)" : "Save Changes"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ---------- Day pill ---------- */
-
-type DayPillProps = {
-  index: number;
-  day: {
-    label: string;
-    date: Date;
-    dateLabel: string;
-    dayNumber: number;
-  };
-  today: Date;
-  activeDayIndex: number;
-  setActiveDayIndex: (idx: number) => void;
-  showDateLabel?: boolean;
+type HabitEvent = {
+  id: string;
+  title: string;
+  description: string | null;
+  frequency: string; // "DAILY" | "WEEKLY" | "MONTHLY"
+  daysOfWeek: number[];
+  color: string | null;
+  createdAt: string;
 };
 
-function DayPill({
-  index,
-  day,
-  today,
-  activeDayIndex,
-  setActiveDayIndex,
-  showDateLabel,
-}: DayPillProps) {
-  const { setNodeRef, isOver } = useDroppable({ id: `day:${index}` });
+type PlannerCalendarProps = {
+  plans: PlanEvent[];
+  todos: TodoEvent[];
+  habits: HabitEvent[];
+};
 
-  const isSelected = index === activeDayIndex;
-  const isTodayFlag = isSameDay(day.date, today);
+type PlannerFilter = "ALL" | "PLANS" | "TODOS" | "HABITS";
 
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function startOfGrid(date: Date) {
+  const first = startOfMonth(date);
+  const day = first.getDay(); // 0 (Sun) - 6 (Sat)
+  const diff = -day;
+  return new Date(first.getFullYear(), first.getMonth(), first.getDate() + diff);
+}
+
+function isSameDay(a: Date, b: Date) {
   return (
-    <button
-      ref={setNodeRef}
-      onClick={() => setActiveDayIndex(index)}
-      className={`flex flex-col items-center rounded-2xl px-3 py-2 text-xs transition border ${
-        isSelected
-          ? "bg-primary text-primary-content shadow-sm border-primary"
-          : "bg-base-100 text-base-content border-base-300"
-      } ${isOver ? "ring-2 ring-primary/60" : ""}`}
-    >
-      <span className="font-semibold">{day.label}</span>
-      <span
-        className={`mt-1 flex h-7 w-7 items-center justify-center rounded-full text-sm ${
-          isTodayFlag && !isSelected ? "border border-primary text-primary" : ""
-        } ${isSelected ? "bg-primary-content text-primary" : ""}`}
-      >
-        {day.dayNumber}
-      </span>
-      {showDateLabel && (
-        <span className="mt-1 text-[11px] text-base-content/60">
-          {day.dateLabel}
-        </span>
-      )}
-    </button>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
   );
 }
 
-/* ---------- Time slot row & event card ---------- */
+function isHabitActiveOnDate(habit: HabitEvent, day: Date): boolean {
+  const created = new Date(habit.createdAt);
+  if (day < created) return false;
 
-type TimeSlotRowProps = {
-  dayIndex: number;
-  hour: number;
-  events: PlannerEvent[];
-  openCreateModal: (dayIndex: number, hour: number) => void;
-  openEditModal: (ev: PlannerEvent) => void;
-  handleDelete: (id: string) => void;
-};
+  if (habit.frequency === "DAILY") return true;
 
-function TimeSlotRow({
-  dayIndex,
-  hour,
-  events,
-  openCreateModal,
-  openEditModal,
-  handleDelete,
-}: TimeSlotRowProps) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: `slot:${dayIndex}:${hour}`,
+  if (habit.frequency === "WEEKLY") {
+    const weekday = day.getDay(); // 0-6
+    return habit.daysOfWeek.includes(weekday);
+  }
+
+  // MONTHLY: show on the same day-of-month as creation
+  if (habit.frequency === "MONTHLY") {
+    return day.getDate() === created.getDate();
+  }
+
+  return false;
+}
+
+const HABIT_COLOR_CLASSES = [
+  "bg-emerald-500/85",
+  "bg-sky-500/85",
+  "bg-violet-500/85",
+  "bg-amber-400/90 text-black",
+  "bg-rose-500/85",
+  "bg-teal-500/85",
+  "bg-lime-500/85 text-black",
+];
+
+function getHabitColorClass(habit: HabitEvent, index: number): string {
+  if (habit.color) {
+    if (habit.color.startsWith("bg-")) return habit.color;
+  }
+
+  return HABIT_COLOR_CLASSES[index % HABIT_COLOR_CLASSES.length];
+}
+
+function formatTime(date: Date | null) {
+  if (!date) return "";
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+export function PlannerCalendar({ plans, todos, habits }: PlannerCalendarProps) {
+  const [currentMonth, setCurrentMonth] = useState<Date>(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
   });
 
+  const [filter, setFilter] = useState<PlannerFilter>("ALL");
+  const [selectedDay, setSelectedDay] = useState<Date | null>(null);
+
+  const gridDays = useMemo(() => {
+    const start = startOfGrid(currentMonth);
+    const days: Date[] = [];
+    for (let i = 0; i < 42; i++) {
+      days.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+    }
+    return days;
+  }, [currentMonth]);
+
+  const monthLabel = useMemo(
+    () =>
+      currentMonth.toLocaleDateString(undefined, {
+        month: "long",
+        year: "numeric",
+      }),
+    [currentMonth]
+  );
+
+  const today = new Date();
+
+  function handlePrevMonth() {
+    setCurrentMonth(
+      (prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1)
+    );
+  }
+
+  function handleNextMonth() {
+    setCurrentMonth(
+      (prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1)
+    );
+  }
+
+  function getEventsForDay(day: Date) {
+    const dayEvents: {
+      type: "PLAN" | "TODO" | "HABIT";
+      id: string;
+      title: string;
+      description: string | null;
+      colorClass?: string;
+      subtle?: boolean;
+    }[] = [];
+
+    // plans
+    if (filter === "ALL" || filter === "PLANS") {
+      for (const p of plans) {
+        const start = new Date(p.startsAt);
+        const end = p.endsAt ? new Date(p.endsAt) : start;
+        if (day >= start && day <= end) {
+          dayEvents.push({
+            type: "PLAN",
+            id: p.id,
+            title: p.title,
+            description: p.description,
+            subtle: p.completed,
+          });
+        }
+      }
+    }
+
+    // todos
+    if (filter === "ALL" || filter === "TODOS") {
+      for (const t of todos) {
+        if (!t.dueDate) continue;
+        const due = new Date(t.dueDate);
+        if (isSameDay(day, due)) {
+          dayEvents.push({
+            type: "TODO",
+            id: t.id,
+            title: t.title,
+            description: t.description,
+            subtle: t.status === "COMPLETED",
+          });
+        }
+      }
+    }
+
+    // habits
+    if (filter === "ALL" || filter === "HABITS") {
+      habits.forEach((h, index) => {
+        if (isHabitActiveOnDate(h, day)) {
+          dayEvents.push({
+            type: "HABIT",
+            id: h.id,
+            title: h.title,
+            description: h.description,
+            colorClass: getHabitColorClass(h, index),
+          });
+        }
+      });
+    }
+
+    return dayEvents;
+  }
+
+  const selectedDayEvents = useMemo(() => {
+    if (!selectedDay) return [];
+
+    const events: {
+      type: "PLAN" | "TODO" | "HABIT";
+      title: string;
+      description: string | null;
+      start: Date | null;
+      end: Date | null;
+      label: string;
+    }[] = [];
+
+    // Plans
+    plans.forEach((p) => {
+      const start = new Date(p.startsAt);
+      const end = p.endsAt ? new Date(p.endsAt) : null;
+      if (isSameDay(start, selectedDay)) {
+        events.push({
+          type: "PLAN",
+          title: p.title,
+          description: p.description,
+          start,
+          end,
+          label: `${formatTime(start)}${end ? " – " + formatTime(end) : ""}`,
+        });
+      }
+    });
+
+    // To-Dos (due at time)
+    todos.forEach((t) => {
+      if (!t.dueDate) return;
+      const due = new Date(t.dueDate);
+      if (isSameDay(due, selectedDay)) {
+        events.push({
+          type: "TODO",
+          title: t.title,
+          description: t.description,
+          start: due,
+          end: null,
+          label: `Due at ${formatTime(due)}`,
+        });
+      }
+    });
+
+    // Habits (all-day)
+    habits.forEach((h) => {
+      if (isHabitActiveOnDate(h, selectedDay)) {
+        events.push({
+          type: "HABIT",
+          title: h.title,
+          description: h.description,
+          start: null,
+          end: null,
+          label: "All day habit",
+        });
+      }
+    });
+
+    // sort by time (habits last)
+    events.sort((a, b) => {
+      if (!a.start && !b.start) return 0;
+      if (!a.start) return 1;
+      if (!b.start) return -1;
+      return a.start.getTime() - b.start.getTime();
+    });
+
+    return events;
+  }, [selectedDay, plans, todos, habits]);
+
   return (
-    <div
-      ref={setNodeRef}
-      className={`rounded-xl border border-base-300 bg-base-100 px-3 py-2 shadow-sm transition-colors ${
-        isOver ? "border-primary/70 bg-base-200" : ""
-      }`}
-    >
-      <div className="mb-1 flex items-center justify-between">
-        <span className="flex items-center gap-2 text-xs font-semibold text-base-content/80">
-          <Clock className="h-3 w-3" />
-          {formatHour(hour)}
-        </span>
-        <button
-          type="button"
-          onClick={() => openCreateModal(dayIndex, hour)}
-          className="btn btn-ghost btn-xs gap-1"
-        >
-          <Plus className="h-3 w-3" />
-          Add
-        </button>
-      </div>
-      {events.length === 0 ? (
-        <p className="text-[11px] text-base-content/40">No plans yet</p>
-      ) : (
-        <div className="flex flex-col gap-1">
-          {events.map((ev) => (
-            <PlannerEventCard
-              key={ev.id}
-              ev={ev}
-              onEdit={openEditModal}
-              onDelete={handleDelete}
-            />
+    <div className="space-y-4">
+      {/* Header + filters */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handlePrevMonth}
+            className="btn btn-ghost btn-xs rounded-full border border-base-300/70"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold text-slate-50">
+              {monthLabel}
+            </span>
+            <span className="text-[11px] text-neutral/60">
+              Plan tasks, to-dos, and habits in one view.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleNextMonth}
+            className="btn btn-ghost btn-xs rounded-full border border-base-300/70"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5 text-[11px]">
+          {[
+            { key: "ALL", label: "All" },
+            { key: "PLANS", label: "Plans" },
+            { key: "TODOS", label: "To-Dos" },
+            { key: "HABITS", label: "Habits" },
+          ].map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setFilter(f.key as PlannerFilter)}
+              className={`rounded-full px-3 py-1 border text-[11px] transition ${
+                filter === f.key
+                  ? "border-primary bg-primary/90 text-black"
+                  : "border-base-300 bg-base-200/60 text-neutral/70 hover:bg-base-300/70 hover:text-slate-100"
+              }`}
+            >
+              {f.label}
+            </button>
           ))}
         </div>
-      )}
-    </div>
-  );
-}
+      </div>
 
-type PlannerEventCardProps = {
-  ev: PlannerEvent;
-  onEdit: (ev: PlannerEvent) => void;
-  onDelete: (id: string) => void;
-};
+      {/* Legend */}
+      <div className="flex flex-wrap gap-2 text-[10px] text-neutral/60">
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-primary" />
+          Plan
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-sky-400" />
+          To-Do
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-emerald-400" />
+          Habit
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-sm border border-dashed border-base-300" />
+          Today
+        </span>
+      </div>
 
-function PlannerEventCard({ ev, onEdit, onDelete }: PlannerEventCardProps) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({ id: ev.id });
+      {/* Calendar grid */}
+      <div className="overflow-hidden rounded-2xl border border-base-300/70 bg-base-200/70">
+        <div className="grid grid-cols-7 border-b border-base-300/70 bg-base-300/40 text-[11px] text-neutral/70">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+            <div key={d} className="px-2 py-2 text-center">
+              {d}
+            </div>
+          ))}
+        </div>
 
-  // Height proportional to duration, min 1 hour
-  const durationMs = Math.max(
-    60 * 60 * 1000,
-    ev.endsAt.getTime() - ev.startsAt.getTime()
-  );
-  const durationHours = durationMs / (60 * 60 * 1000);
+        <div className="grid grid-cols-7 text-xs">
+          {gridDays.map((day, idx) => {
+            const inCurrentMonth = day.getMonth() === currentMonth.getMonth();
+            const isToday = isSameDay(day, today);
+            const events = getEventsForDay(day);
 
-  const style: CSSProperties = {
-    transform: transform
-      ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
-      : undefined,
-    opacity: isDragging ? 0.8 : 1,
-    boxShadow: isDragging
-      ? "0 10px 25px rgba(0,0,0,0.25)"
-      : "0 2px 4px rgba(0,0,0,0.15)",
-    minHeight: `${durationHours * 2.5}rem`,
-  };
+            return (
+              <div
+                key={day.toISOString() + idx}
+                onClick={() => setSelectedDay(day)}
+                className={`min-h-[80px] cursor-pointer border-t border-r border-base-300/40 p-1.5 align-top ${
+                  idx % 7 === 0 ? "border-l" : ""
+                } ${
+                  inCurrentMonth
+                    ? "bg-base-200/70"
+                    : "bg-base-200/20 text-neutral/50"
+                }`}
+              >
+                <div className="mb-1 flex items-center justify-between">
+                  <span
+                    className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] ${
+                      isToday
+                        ? "border border-dashed border-base-100 bg-base-300/70 text-slate-50"
+                        : "text-neutral/70"
+                    }`}
+                  >
+                    {day.getDate()}
+                  </span>
+                  {events.length > 0 && (
+                    <span className="text-[9px] text-neutral/50">
+                      {events.length} item{events.length > 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
 
-  return (
-    <div
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      style={style}
-      className={`group rounded-lg border px-3 py-2 text-xs transition hover:border-primary/60 hover:bg-base-200 ${
-        importanceStyles[ev.importance]
-      } ${ev.completed ? "line-through opacity-60" : ""}`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="font-semibold">{ev.title}</div>
-          <div className="text-[10px] text-base-content/60">
-            {formatTimeRange(ev.startsAt, ev.endsAt)}
+                <div className="space-y-0.5">
+                  {events.slice(0, 3).map((ev) => {
+                    if (ev.type === "HABIT") {
+                      return (
+                        <div
+                          key={ev.id}
+                          className={`truncate rounded-md px-1 py-0.5 text-[10px] font-medium shadow-sm ${
+                            ev.colorClass ?? "bg-emerald-500/80"
+                          }`}
+                        >
+                          {ev.title}
+                        </div>
+                      );
+                    }
+
+                    if (ev.type === "TODO") {
+                      return (
+                        <div
+                          key={ev.id}
+                          className={`truncate rounded-md border border-sky-500/40 bg-sky-500/15 px-1 py-0.5 text-[10px] ${
+                            ev.subtle ? "opacity-60 line-through" : ""
+                          }`}
+                        >
+                          ✅ {ev.title}
+                        </div>
+                      );
+                    }
+
+                    // PLAN
+                    return (
+                      <div
+                        key={ev.id}
+                        className={`truncate rounded-md border border-primary/40 bg-primary/15 px-1 py-0.5 text-[10px] ${
+                          ev.subtle ? "opacity-60 line-through" : ""
+                        }`}
+                      >
+                        📅 {ev.title}
+                      </div>
+                    );
+                  })}
+
+                  {events.length > 3 && (
+                    <div className="text-[10px] text-neutral/60">
+                      +{events.length - 3} more
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Selected day timeline */}
+      {selectedDay && (
+        <div className="mt-4 rounded-2xl border border-base-300/70 bg-base-200/80 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-50">
+                {selectedDay.toLocaleDateString(undefined, {
+                  weekday: "long",
+                  month: "short",
+                  day: "numeric",
+                })}
+              </h3>
+              <p className="text-[11px] text-neutral/60">
+                Timeline of plans, to-dos, and habits for this day.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedDay(null)}
+              className="btn btn-ghost btn-xs rounded-full border border-base-300/70 text-[10px]"
+            >
+              Close
+            </button>
           </div>
-          {ev.description && (
-            <div className="mt-0.5 text-[11px] text-base-content/70 line-clamp-2">
-              {ev.description}
+
+          {selectedDayEvents.length === 0 ? (
+            <p className="text-[11px] text-neutral/60">
+              Nothing scheduled for this day yet.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {selectedDayEvents.map((ev, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-start gap-3 rounded-xl border border-base-300/70 bg-base-300/40 px-3 py-2 text-[11px]"
+                >
+                  <div className="mt-[2px] w-16 flex-shrink-0 text-right text-neutral/60">
+                    {ev.start ? ev.label : "All day"}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[9px] ${
+                          ev.type === "PLAN"
+                            ? "bg-primary text-black"
+                            : ev.type === "TODO"
+                            ? "bg-sky-400 text-black"
+                            : "bg-emerald-400 text-black"
+                        }`}
+                      >
+                        {ev.type === "PLAN"
+                          ? "P"
+                          : ev.type === "TODO"
+                          ? "T"
+                          : "H"}
+                      </span>
+                      <span className="font-medium text-slate-50">
+                        {ev.title}
+                      </span>
+                    </div>
+                    {ev.description && (
+                      <p className="mt-0.5 text-[10px] text-neutral/60">
+                        {ev.description}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
-        <div className="flex flex-col items-end gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition">
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs p-1"
-            onClick={() => onEdit(ev)}
-          >
-            <Edit3 className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs p-1 text-error"
-            onClick={() => onDelete(ev.id)}
-          >
-            <Trash2 className="h-3 w-3" />
-          </button>
-        </div>
-      </div>
-      <div className="mt-1 text-[10px] text-base-content/60">
-        {ev.startsAt.toLocaleTimeString(undefined, {
-          hour: "numeric",
-          minute: "2-digit",
-        })}{" "}
-        –{" "}
-        {ev.endsAt.toLocaleTimeString(undefined, {
-          hour: "numeric",
-          minute: "2-digit",
-        })}
-      </div>
+      )}
     </div>
   );
 }

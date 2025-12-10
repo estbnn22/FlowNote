@@ -291,31 +291,29 @@ function DroppableColumn({
   const [open, setOpen] = useState(true);
 
   return (
-    <div
-      className={`rounded-2xl border ${column.borderClass} ${column.bgClass} shadow-sm transition-colors duration-200`}
-    >
+    <div className="rounded-2xl border border-base-300 bg-base-200/60 shadow-sm transition-colors duration-200">
       {/* Header */}
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between p-3 cursor-pointer"
+        className="flex w-full items-center justify-between px-3 py-2 cursor-pointer"
       >
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-base-100/70 text-neutral/70">
+        <div className="flex flex-col gap-0.5 text-left">
+          <span className="text-xs font-semibold text-slate-50">
             {column.label}
           </span>
-          <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${column.headerBadgeClass}`}
-          >
-            {column.key}
+          <span className="text-[10px] text-neutral/60">
+            {column.subtitle}
           </span>
         </div>
 
         {/* Count + Chevron */}
         <div className="flex items-center gap-2 text-[11px] text-neutral/60">
-          {count} note{count === 1 ? "" : "s"}
+          <span className="rounded-full bg-base-300/70 px-2 py-0.5">
+            {count} note{count === 1 ? "" : "s"}
+          </span>
           <span
-            className={`transition-transform ${
+            className={`text-xs transition-transform ${
               open ? "rotate-180" : "rotate-0"
             }`}
           >
@@ -328,10 +326,10 @@ function DroppableColumn({
       <div
         ref={setNodeRef}
         className={`overflow-hidden transition-all duration-200 ${
-          open ? "max-h-[2000px] p-3" : "max-h-0 px-3"
-        } ${isOver ? "border-primary/60 bg-base-100/70" : ""}`}
+          open ? "max-h-[2000px] px-3 pb-3" : "max-h-0 px-3"
+        } ${isOver ? "border-primary/60 bg-base-100/80" : ""}`}
       >
-        <div className="flex-1 space-y-2">{children}</div>
+        <div className="space-y-2">{children}</div>
       </div>
     </div>
   );
@@ -373,16 +371,22 @@ function DraggableNoteCard({
       className="active:cursor-grabbing"
     >
       <article
-        className={`group rounded-xl border border-base-300/80 bg-base-100/80 p-3 text-xs transition hover:border-primary/60 hover:bg-base-100 ${
-          note.pinned ? "ring-1 ring-primary/60" : ""
-        } ${activeId === note.id ? "ring-2 ring-primary/70" : ""}`}
+        className={`rounded-xl border border-base-300/70 bg-base-100/80 p-3 text-xs transition hover:border-primary/60 hover:bg-base-100 ${
+          activeId === note.id ? "ring-2 ring-primary/60" : ""
+        }`}
       >
+        {/* Title row */}
         <div className="mb-1 flex items-start justify-between gap-2">
-          <h3 className="line-clamp-1 font-semibold text-neutral">
-            {note.title}
+          <h3 className="line-clamp-1 font-semibold text-slate-50">
+            {note.title || "Untitled note"}
           </h3>
 
           <div className="flex items-center gap-1">
+            {note.pinned && (
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] text-primary">
+                Pinned
+              </span>
+            )}
             <button
               type="button"
               onClick={() => onTogglePin(note.id)}
@@ -406,12 +410,14 @@ function DraggableNoteCard({
           </div>
         </div>
 
+        {/* Content preview */}
         {note.content && (
           <p className="mb-1 line-clamp-3 text-[11px] text-neutral/70">
             {note.content}
           </p>
         )}
 
+        {/* Meta */}
         <p className="mt-1 text-[10px] text-neutral/50">
           Updated{" "}
           {new Date(note.updatedAt).toLocaleString(undefined, {

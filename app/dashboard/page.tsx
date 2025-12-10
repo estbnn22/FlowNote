@@ -5,7 +5,86 @@ import { stackServerApp } from "@/stack/server";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import DashboardClient from "./DashboardClient";
+import type { Habit } from "@prisma/client";
+import { revalidatePath } from "next/cache";
 
+// --- helper to know if a habit is active on a given day ---
+function isHabitActiveOnDate(habit: Habit, day: Date): boolean {
+
+  if (habit.frequency === "DAILY") return true;
+
+  if (habit.frequency === "WEEKLY") {
+    const weekday = day.getDay(); // 0-6
+    return (habit.daysOfWeek ?? []).includes(weekday);
+  }
+
+  if (habit.frequency === "MONTHLY") {
+    // simple version: show monthly habits every month on the created day
+    const created = habit.createdAt;
+    return day.getDate() === created.getDate();
+  }
+
+  return false;
+}
+
+// --- server action: toggle todo status from dashboard ---
+export async function toggleTodoAction(formData: FormData) {
+  "use server";
+
+  const user = await stackServerApp.getUser();
+  if (!user) return;
+
+  const id = formData.get("id") as string | null;
+  const currentStatus = formData.get("currentStatus") as string | null;
+  if (!id || !currentStatus) return;
+
+  const todo = await prisma.toDo.findUnique({ where: { id } });
+  if (!todo || todo.userId !== user.id) return;
+
+  // simple toggle DONE ↔ TODO (you can adjust to include IN_PROGRESS if you want)
+  const nextStatus =
+    currentStatus === "DONE"
+      ? "TODO"
+      : "DONE";
+
+  await prisma.toDo.update({
+    where: { id },
+    data: { status: nextStatus },
+  });
+
+  revalidatePath("/dashboard");
+}
+
+// --- server action: quick add todo from dashboard ---
+export async function quickAddTodoAction(formData: FormData) {
+  "use server";
+
+  const user = await stackServerApp.getUser();
+  if (!user) return;
+
+  const title = (formData.get("title") as string | null)?.trim();
+  if (!title) return;
+
+  const importance =
+    ((formData.get("importance") as string | null) ?? "MEDIUM") as
+      | "LOW"
+      | "MEDIUM"
+      | "HIGH";
+
+  await prisma.toDo.create({
+    data: {
+      userId: user.id,
+      title,
+      importance,
+      status: "TODO",
+      dueAt: null,
+    },
+  });
+
+  revalidatePath("/dashboard");
+}
+
+// --- main dashboard page ---
 export default async function Dashboard() {
   const user = await stackServerApp.getUser();
   if (!user) {
@@ -26,6 +105,7 @@ export default async function Dashboard() {
     todayOpenTodos,
     overdueTodos,
     todayPlansCount,
+    habitsRaw,
   ] = await Promise.all([
     prisma.toDo.findMany({
       where: { userId: user.id },
@@ -76,8 +156,16 @@ export default async function Dashboard() {
         completed: false,
       },
     }),
+    prisma.habit.findMany({
+      where: {
+        userId: user.id,
+        isArchived: false,
+      },
+      orderBy: { createdAt: "asc" },
+    }),
   ]);
 
+  // sort todos by importance then recency
   const importanceRank: Record<string, number> = {
     HIGH: 3,
     MEDIUM: 2,
@@ -103,7 +191,21 @@ export default async function Dashboard() {
             100
         );
 
-  // Serialize for client
+  // habits for today
+  const todayHabitsRaw = habitsRaw.filter((h) =>
+    isHabitActiveOnDate(h, startOfToday)
+  );
+  const totalHabits = habitsRaw.length;
+
+  const clientHabitsToday = todayHabitsRaw.map((h) => ({
+    id: h.id,
+    title: h.title,
+    description: h.description ?? null,
+    frequency: h.frequency,
+    color: h.color ?? null,
+  }));
+
+  // serialize for client
   const clientTodos = sortedTodos.map((t) => ({
     id: t.id,
     title: t.title,
@@ -143,6 +245,10 @@ export default async function Dashboard() {
           todayOpenTodos={todayOpenTodos}
           overdueTodos={overdueTodos}
           todayPlansCount={todayPlansCount}
+          habitsToday={clientHabitsToday}
+          totalHabits={totalHabits}
+          toggleTodoAction={toggleTodoAction}
+          quickAddTodoAction={quickAddTodoAction}
         />
       </main>
 

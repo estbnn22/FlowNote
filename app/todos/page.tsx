@@ -7,7 +7,16 @@ import { redirect } from "next/navigation";
 import TodoBoard from "@/components/ToDoBoard";
 import { createTodo } from "../actions/todos/actions";
 
-export default async function TodosPage() {
+type TodosPageProps = {
+  searchParams?: { quickAdd?: string | string[] };
+};
+
+export default async function TodosPage({ searchParams }: TodosPageProps) {
+  const quickAddParam = searchParams?.quickAdd;
+  const shouldAutoOpenNewTodo = Array.isArray(quickAddParam)
+    ? quickAddParam.includes("todo")
+    : quickAddParam === "todo";
+
   const user = await stackServerApp.getUser();
   if (!user) redirect("/signIn");
 
@@ -53,9 +62,11 @@ export default async function TodosPage() {
             <div className="flex flex-col gap-1">
               <label className="text-xs text-neutral/70">Title</label>
               <input
+                id="new-todo-title"
                 name="title"
                 type="text"
                 required
+                autoFocus={shouldAutoOpenNewTodo}
                 className="rounded-lg border border-base-300 bg-base-300/60 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/60"
                 placeholder="Task title..."
               />
