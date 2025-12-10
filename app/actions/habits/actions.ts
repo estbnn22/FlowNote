@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { stackServerApp } from "@/stack/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import type { HabitFrequency, HabitType } from "@prisma/client";
 
 export async function createHabit(formData: FormData) {
   const user = await stackServerApp.getUser();
@@ -35,19 +36,17 @@ export async function createHabit(formData: FormData) {
     return;
   }
 
-  await prisma.habit.create({
-    data: {
-      userId: user.id,
-      title,
-      description,
-      frequency, // Prisma will validate against HabitFrequency enum
-      type,      // Prisma will validate against HabitType enum
-      targetPerPeriod: targetPerPeriod ?? undefined,
-      daysOfWeek,
-      color: null,
-      icon: null,
-    },
-  });
+await prisma.habit.create({
+  data: {
+    userId: user.id,
+    title,
+    description,
+    frequency: frequency as HabitFrequency,
+    type: type as HabitType,
+    targetPerPeriod: targetPerPeriod ?? undefined,
+    daysOfWeek,
+  },
+});
 
   revalidatePath("/habits");
 }
