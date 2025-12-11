@@ -16,23 +16,23 @@ type MobileNavProps = {
 };
 
 const baseNavItemClasses =
-  "group flex flex-1 flex-col items-center justify-center gap-1 py-1";
+  "group flex flex-1 flex-col items-center justify-center gap-0.5 py-1";
 
 const baseIconWrapperClasses =
-  "flex h-9 w-9 items-center justify-center rounded-full transition-all duration-150";
+  "flex h-8 w-8 items-center justify-center rounded-full transition-all duration-150";
 
 const baseLabelClasses = "text-[10px] font-medium tracking-wide";
 
 export default function MobileNav({
   currentPage = "/dashboard",
 }: MobileNavProps) {
-  const [isFabOpen, setIsFabOpen] = useState(false);
+  const [isQuickOpen, setIsQuickOpen] = useState(false);
 
-  const leftPages = [
+  const navItems = [
     { name: "Dashboard", href: "/dashboard", icon: Blocks },
-  ];
-
-  const rightPages = [
+    { name: "Notes", href: "/notes", icon: NotebookPen },
+    { name: "Todos", href: "/todos", icon: ListTodo },
+    { name: "Planner", href: "/planner", icon: CalendarCheck },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
 
@@ -70,8 +70,8 @@ export default function MobileNav({
             baseIconWrapperClasses +
             " " +
             (isActive
-              ? "bg-primary/20 text-primary"
-              : "bg-transparent text-neutral/70 group-hover:bg-base-300/80 group-hover:text-primary")
+              ? "bg-primary/15 text-primary shadow-sm"
+              : "bg-transparent text-neutral/60 group-hover:bg-base-300/70 group-hover:text-primary")
           }
         >
           <Icon className="h-4 w-4" strokeWidth={2.2} />
@@ -83,7 +83,7 @@ export default function MobileNav({
             " " +
             (isActive
               ? "text-primary"
-              : "text-neutral/60 group-hover:text-primary")
+              : "text-neutral/55 group-hover:text-primary")
           }
         >
           {item.name}
@@ -93,78 +93,109 @@ export default function MobileNav({
   };
 
   return (
-    <nav
-      className="
-        fixed bottom-4 left-1/2 z-40 flex
-        w-[92%] max-w-md -translate-x-1/2 items-center justify-between
-        rounded-2xl border border-base-300/50 bg-base-200/25
-        px-3 py-2 shadow-[0_18px_60px_rgba(0,0,0,0.55)]
-        backdrop-blur-xs
-        md:hidden
-      "
-    >
-      {/* left links */}
-      <div className="flex flex-1 items-center justify-start">
-        {leftPages.map(renderNavLink)}
-      </div>
+    <>
+      {/* Bottom nav bar */}
+      <nav
+        className="
+          fixed bottom-3 left-1/2 z-40 flex
+          w-[92%] max-w-md -translate-x-1/2 items-center justify-between
+          rounded-2xl border border-base-300/60 bg-base-200/80
+          px-3 py-2 shadow-[0_18px_60px_rgba(0,0,0,0.45)]
+          backdrop-blur-md
+          md:hidden
+        "
+      >
+        <div className="flex w-full items-center justify-between gap-1">
+          {navItems.map(renderNavLink)}
+        </div>
+      </nav>
 
-      {/* centered FAB + quick actions */}
-      <div className="relative flex flex-none items-center justify-center px-1">
-        {/* quick actions menu */}
-        {isFabOpen && (
-          <div className="absolute -top-3 flex -translate-y-full flex-col items-center gap-2">
-            {quickActions.map((action) => {
-              const ActionIcon = action.icon;
-              return (
-                <Link
-                  key={action.label}
-                  href={action.href}
-                  className="flex items-center gap-1 bg-base-200/50 rounded-xl py-1 px-3"
-                  onClick={() => setIsFabOpen(false)}
-                >
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full border border-base-300 bg-base-200/90 shadow-md">
-                    <ActionIcon className="h-4 w-4" strokeWidth={2.1} />
-                  </div>
-                  <span className="text-[9px] font-medium text-neutral/70">
-                    {action.label}
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
-        )}
-
-        {/* FAB button */}
-        <button
-          type="button"
-          aria-label="Quick add"
-          onClick={() => setIsFabOpen((prev) => !prev)}
-          className="btn btn-lg btn-circle btn-primary shadow-[0_12px_30px_rgba(0,0,0,0.6)]"
+      {/* Floating + button for quick add */}
+      <button
+        type="button"
+        aria-label="Quick add"
+        onClick={() => setIsQuickOpen(true)}
+        className="
+          fixed bottom-16 right-5 z-50 md:hidden
+          btn btn-primary btn-circle shadow-[0_12px_30px_rgba(0,0,0,0.6)]
+        "
+      >
+        <svg
+          aria-hidden="true"
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          strokeWidth="2"
+          stroke="currentColor"
+          className="size-5"
         >
-          <svg
-            aria-hidden="true"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth="2"
-            stroke="currentColor"
-            className={`size-6 transition-transform duration-150 ${
-              isFabOpen ? "rotate-45" : "rotate-0"
-            }`}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 4.5v15m7.5-7.5h-15"
-            />
-          </svg>
-        </button>
-      </div>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 4.5v15m7.5-7.5h-15"
+          />
+        </svg>
+      </button>
 
-      {/* right links */}
-      <div className="flex flex-1 items-center justify-end">
-        {rightPages.map(renderNavLink)}
-      </div>
-    </nav>
+      {/* Quick actions bottom sheet */}
+      {isQuickOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center md:hidden">
+          {/* Backdrop */}
+          <button
+            type="button"
+            aria-label="Close quick actions"
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setIsQuickOpen(false)}
+          />
+
+          <div
+            className="
+              relative z-10 mb-2 w-full max-w-md
+              rounded-t-2xl border border-base-300 bg-base-200/95
+              px-4 pb-4 pt-3 shadow-[0_-18px_60px_rgba(0,0,0,0.7)]
+            "
+          >
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral/60">
+                Quick actions
+              </span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                onClick={() => setIsQuickOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {quickActions.map((action) => {
+                const ActionIcon = action.icon;
+                return (
+                  <Link
+                    key={action.label}
+                    href={action.href}
+                    className="flex items-center gap-2 rounded-xl border border-base-300/70 bg-base-100/80 px-3 py-2 text-left shadow-sm"
+                    onClick={() => setIsQuickOpen(false)}
+                  >
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-base-200">
+                      <ActionIcon className="h-4 w-4" strokeWidth={2.1} />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-semibold text-neutral/80">
+                        {action.label}
+                      </span>
+                      <span className="text-[9px] text-neutral/60">
+                        Tap to create
+                      </span>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
